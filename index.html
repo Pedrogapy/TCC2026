@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Portal Acadêmico Acessível</title>
+  <meta name="description" content="Protótipo web de um portal acadêmico acessível com base para controle ocular e avaliação de usabilidade." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div class="app-bg"></div>
+
+  <div class="auth-overlay" id="auth-overlay">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <span class="brand-badge">TCC</span>
+        <div>
+          <h1>Portal Acadêmico Acessível</h1>
+          <p>Simulação de sistema acadêmico com foco em acessibilidade e controle ocular.</p>
+        </div>
+      </div>
+
+      <div class="auth-highlight-grid">
+        <div class="auth-highlight">
+          <strong>Dashboard</strong>
+          <span>Métricas e visão geral do sistema</span>
+        </div>
+        <div class="auth-highlight">
+          <strong>Gestão de Alunos</strong>
+          <span>Cadastro, edição e consulta de registros</span>
+        </div>
+        <div class="auth-highlight">
+          <strong>Acessibilidade</strong>
+          <span>Permissão de webcam e base para controle ocular</span>
+        </div>
+      </div>
+
+      <form id="login-form" class="auth-form">
+        <label>
+          <span>E-mail institucional</span>
+          <input type="email" name="email" placeholder="coordenacao@faculdade.local" required />
+        </label>
+
+        <label>
+          <span>Senha</span>
+          <input type="password" name="password" placeholder="••••••••" required />
+        </label>
+
+        <div class="auth-demo-box">
+          <small><strong>Login fictício para demonstração</strong></small>
+          <small>E-mail: <strong>admin@portal.local</strong></small>
+          <small>Senha: <strong>123456</strong></small>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-lg">Entrar no sistema</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="app-shell" id="app-shell" aria-hidden="true">
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <div class="brand-mark">PA</div>
+        <div>
+          <h2>Portal Acadêmico</h2>
+          <p>Acessível</p>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item" data-route="/dashboard" type="button">
+          <span class="nav-icon">▣</span>
+          <span>Dashboard</span>
+        </button>
+        <button class="nav-item" data-route="/students" type="button">
+          <span class="nav-icon">◫</span>
+          <span>Alunos</span>
+        </button>
+        <button class="nav-item" data-route="/students/new" type="button">
+          <span class="nav-icon">＋</span>
+          <span>Novo aluno</span>
+        </button>
+        <button class="nav-item" data-route="/accessibility" type="button">
+          <span class="nav-icon">◎</span>
+          <span>Acessibilidade</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="status-card compact">
+          <span class="status-label">Status do protótipo</span>
+          <strong id="version-badge">v0.1.0</strong>
+          <small>Base visual + CRUD local + webcam preparada</small>
+        </div>
+
+        <button id="logout-button" class="btn btn-secondary btn-block" type="button">Sair</button>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="page-eyebrow">Sistema acadêmico</p>
+          <h1 id="page-title">Dashboard</h1>
+          <p class="page-description" id="page-description">Visão geral operacional da instituição e dos dados cadastrados.</p>
+        </div>
+
+        <div class="topbar-actions">
+          <label class="searchbox">
+            <span>Pesquisar aluno</span>
+            <input type="search" id="global-search" placeholder="Nome, matrícula, curso..." />
+          </label>
+
+          <div class="user-chip">
+            <span class="user-avatar">AD</span>
+            <div>
+              <strong id="session-user-name">Administrador</strong>
+              <small id="session-user-email">admin@portal.local</small>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section id="route-view" class="route-view"></section>
+    </main>
+
+    <aside class="assist-panel">
+      <div class="panel-card webcam-card">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Webcam</p>
+            <h3>Pré-visualização</h3>
+          </div>
+          <span class="pill" id="camera-pill">desligada</span>
+        </div>
+
+        <div class="webcam-frame">
+          <video id="webcam-preview" autoplay muted playsinline></video>
+          <div class="webcam-placeholder" id="webcam-placeholder">
+            <span>Permita o uso da webcam para iniciar.</span>
+          </div>
+        </div>
+
+        <div class="stack-row">
+          <button class="btn btn-primary" id="camera-toggle" type="button">Ativar webcam</button>
+          <button class="btn btn-secondary" id="camera-stop" type="button">Desligar</button>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Controle ocular</p>
+            <h3>Estado do sistema</h3>
+          </div>
+          <span class="pill accent" id="control-pill">pausado</span>
+        </div>
+
+        <div class="status-grid">
+          <div class="status-card">
+            <span class="status-label">Modo</span>
+            <strong id="control-mode-label">Pausado</strong>
+            <small>Piscada longa alterna entre mover e pausar.</small>
+          </div>
+          <div class="status-card">
+            <span class="status-label">Cursor virtual</span>
+            <strong id="cursor-label">Oculto</strong>
+            <small>Clique automático após 7 segundos parado sobre um alvo.</small>
+          </div>
+          <div class="status-card">
+            <span class="status-label">Rastreamento</span>
+            <strong id="tracking-label">Aguardando rosto</strong>
+            <small id="blink-label">Olhos abertos</small>
+          </div>
+          <div class="status-card">
+            <span class="status-label">Dwell atual</span>
+            <strong id="dwell-label">0.0s / 7.0s</strong>
+            <small>O clique automático ocorre somente no modo pausado.</small>
+          </div>
+        </div>
+
+        <form id="accessibility-config-form" class="settings-form">
+          <label>
+            <span>Sensibilidade</span>
+            <input type="range" name="sensitivity" min="1" max="10" value="6" />
+            <small id="sensitivity-value">6</small>
+          </label>
+
+          <label>
+            <span>Suavização</span>
+            <input type="range" name="smoothing" min="1" max="10" value="7" />
+            <small id="smoothing-value">7</small>
+          </label>
+        </form>
+
+        <div class="stack-row">
+          <button class="btn btn-primary" id="toggle-control-mode" type="button">Alternar modo</button>
+          <button class="btn btn-ghost" id="toggle-cursor-visibility" type="button">Mostrar cursor</button>
+        </div>
+      </div>
+
+      <div class="panel-card info-card">
+        <p class="eyebrow">Observação</p>
+        <h3>Objetivo desta etapa</h3>
+        <p>
+          Entregar um sistema visualmente convincente, funcional e pronto para receber a lógica de movimentação ocular.
+          Nesta versão, a parte de software já está organizada para GitHub Pages e persistência local.
+        </p>
+      </div>
+    </aside>
+  </div>
+
+  <div id="virtual-cursor" class="virtual-cursor" aria-hidden="true"></div>
+  <div id="toast-container" class="toast-container"></div>
+
+  <script type="module" src="assets/js/app.js"></script>
+</body>
+</html>
