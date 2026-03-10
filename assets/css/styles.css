@@ -984,3 +984,13 @@ button,
     grid-template-columns: 1fr;
   }
 }
+
+
+#webgazerVideoFeed,
+#webgazerVideoCanvas,
+#webgazerFaceOverlay,
+#webgazerFaceFeedbackBox {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
