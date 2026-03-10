@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Portal Acadêmico Acessível</title>
-  <meta name="description" content="Protótipo web de gestão acadêmica com controle ocular por webcam e calibração guiada." />
+  <meta name="description" content="Protótipo web de gestão acadêmica com controle ocular por webcam no navegador." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -19,12 +19,12 @@
         <span class="badge">TCC 2026</span>
         <h1>Portal Acadêmico Acessível</h1>
         <p>
-          Sistema acadêmico fictício com foco em usabilidade, acessibilidade e navegação por rastreamento ocular.
+          Sistema acadêmico fictício com foco em usabilidade, acessibilidade e rastreamento ocular com webcam.
         </p>
         <ul class="login-points">
           <li>Gestão de alunos com persistência local</li>
-          <li>Controle ocular com cursor virtual</li>
-          <li>Calibração guiada da câmera antes do uso</li>
+          <li>Cursor virtual controlado pelo olhar</li>
+          <li>Câmera solicitada logo na abertura do site</li>
         </ul>
       </div>
 
@@ -63,15 +63,15 @@
           <button class="nav-button active" data-route="dashboard" type="button">Dashboard</button>
           <button class="nav-button" data-route="students" type="button">Alunos</button>
           <button class="nav-button" data-route="student-form" type="button">Novo aluno</button>
-          <button class="nav-button" data-route="accessibility" type="button">Acessibilidade</button>
+          <button class="nav-button" data-route="accessibility" type="button">Rastreamento ocular</button>
         </nav>
       </div>
 
       <div class="sidebar-footer">
         <div class="compact-note">
           <span>Versão atual</span>
-          <strong>v0.3.0</strong>
-          <small>Pitch assist + interface mais limpa</small>
+          <strong>v0.4.0</strong>
+          <small>ajuste inicial automático</small>
         </div>
         <button class="btn btn-secondary btn-block" id="logout-button" type="button">Sair</button>
       </div>
@@ -88,7 +88,7 @@
         <div class="topbar-side">
           <div class="status-pill-row">
             <span class="status-pill" id="camera-status-pill">Câmera desligada</span>
-            <span class="status-pill accent" id="calibration-status-pill">Calibração pendente</span>
+            <span class="status-pill accent" id="calibration-status-pill">Ajuste inicial pendente</span>
             <span class="status-pill success" id="mode-status-pill">Modo pausado</span>
           </div>
           <div class="user-box">
@@ -120,7 +120,7 @@
               <div class="card-head simple">
                 <div>
                   <h2>Estado de acessibilidade</h2>
-                  <p>O sistema só deve ser usado com rastreamento após a calibração.</p>
+                  <p>Direita/esquerda usam os olhos. Cima/baixo usam olhos com leve inclinação do rosto.</p>
                 </div>
               </div>
               <div class="summary-list compact" id="dashboard-accessibility-list"></div>
@@ -240,23 +240,23 @@
         </section>
 
         <section class="route-section" id="section-accessibility">
-          <div class="two-column access-grid">
+          <div class="two-column access-grid compact-access-grid">
             <article class="card camera-card">
               <div class="card-head simple">
                 <div>
-                  <h2>Configuração da câmera</h2>
-                  <p>A calibração vem antes do controle e agora reforça o eixo vertical com olhos + leve inclinação do rosto.</p>
+                  <h2>Ajuste inicial da câmera</h2>
+                  <p>A câmera é solicitada na abertura do site. O ajuste inicial começa sozinho quando o rosto está estável.</p>
                 </div>
               </div>
 
-              <div class="camera-stage">
+              <div class="camera-stage compact-camera-stage">
                 <div class="camera-box">
                   <video id="camera-preview" autoplay muted playsinline></video>
                   <div class="camera-placeholder" id="camera-placeholder">Aguardando permissão da webcam</div>
                 </div>
 
-                <div class="camera-panel">
-                  <div class="mini-stats">
+                <div class="camera-panel compact-camera-panel">
+                  <div class="mini-stats compact-stats">
                     <div class="mini-stat">
                       <span>Câmera</span>
                       <strong id="camera-state-label">Desligada</strong>
@@ -275,18 +275,18 @@
                     </div>
                   </div>
 
-                  <div class="control-buttons">
-                    <button class="btn btn-primary" id="start-camera-button" type="button">Ativar webcam</button>
-                    <button class="btn btn-secondary" id="stop-camera-button" type="button">Desligar webcam</button>
-                    <button class="btn btn-primary" id="start-calibration-button" type="button">Iniciar calibração guiada</button>
-                    <button class="btn btn-ghost" id="toggle-mode-button" type="button">Alternar mover / pausar</button>
-                    <button class="btn btn-ghost" id="toggle-cursor-button" type="button">Mostrar / ocultar cursor</button>
+                  <div class="control-buttons compact-controls">
+                    <button class="btn btn-secondary hidden" id="start-camera-button" type="button">Tentar câmera novamente</button>
+                    <button class="btn btn-secondary hidden" id="stop-camera-button" type="button">Desligar câmera</button>
+                    <button class="btn btn-primary" id="start-calibration-button" type="button">Refazer ajuste inicial</button>
+                    <button class="btn btn-ghost" id="toggle-mode-button" type="button">Mover cursor</button>
+                    <button class="btn btn-ghost" id="toggle-cursor-button" type="button">Ocultar cursor</button>
                   </div>
                 </div>
               </div>
             </article>
 
-            <article class="card settings-card">
+            <article class="card settings-card compact-settings-card">
               <div class="card-head simple">
                 <div>
                   <h2>Ajustes essenciais</h2>
@@ -294,31 +294,31 @@
                 </div>
               </div>
 
-              <form id="eye-settings-form" class="settings-form">
+              <form id="eye-settings-form" class="settings-form compact-settings-form">
                 <label>
-                  <span>Sensibilidade horizontal e vertical</span>
-                  <input type="range" name="sensitivity" min="1" max="10" value="6" />
-                  <small id="sensitivity-label">6</small>
+                  <span>Sensibilidade</span>
+                  <input type="range" name="sensitivity" min="1" max="10" value="4" />
+                  <small id="sensitivity-label">4</small>
                 </label>
                 <label>
-                  <span>Suavização do movimento</span>
-                  <input type="range" name="smoothing" min="1" max="10" value="6" />
-                  <small id="smoothing-label">6</small>
+                  <span>Suavização</span>
+                  <input type="range" name="smoothing" min="1" max="10" value="7" />
+                  <small id="smoothing-label">7</small>
                 </label>
               </form>
 
-              <div class="quick-guide">
+              <div class="quick-guide compact-guide">
                 <div class="quick-guide-item">
-                  <strong>1. Calibre primeiro</strong>
-                  <span>O eixo vertical agora usa olhos e leve inclinação do rosto.</span>
+                  <strong>Direita / esquerda</strong>
+                  <span>Usam principalmente o movimento dos olhos.</span>
                 </div>
                 <div class="quick-guide-item">
-                  <strong>2. Pisque por mais tempo</strong>
-                  <span>A piscada longa alterna entre mover e pausar, agora com tolerância maior.</span>
+                  <strong>Cima / baixo</strong>
+                  <span>Combinam olhos com leve inclinação do rosto.</span>
                 </div>
                 <div class="quick-guide-item">
-                  <strong>3. Teste só depois</strong>
-                  <span>A área de teste fica recolhida até você realmente precisar dela.</span>
+                  <strong>Piscada longa</strong>
+                  <span>Alterna entre mover e pausar o cursor.</span>
                 </div>
               </div>
             </article>
@@ -349,8 +349,8 @@
   <div class="calibration-overlay hidden" id="calibration-overlay">
     <div class="calibration-top">
       <span class="badge soft" id="calibration-step-badge">Preparando</span>
-      <h2 id="calibration-title">Calibração da câmera</h2>
-      <p id="calibration-description">Mantenha a cabeça o mais estável possível e mova apenas os olhos.</p>
+      <h2 id="calibration-title">Ajuste inicial da câmera</h2>
+      <p id="calibration-description">Mantenha o rosto estável e olhe para o centro do monitor por um instante.</p>
     </div>
     <div class="calibration-target" id="calibration-target"></div>
     <div class="calibration-progress-shell">

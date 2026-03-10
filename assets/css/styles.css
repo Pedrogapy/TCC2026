@@ -920,3 +920,34 @@ button,
     padding: 0.8rem;
   }
 }
+
+.compact-access-grid {
+  gap: 1rem;
+}
+
+.compact-camera-stage {
+  grid-template-columns: minmax(0, 1fr) 280px;
+}
+
+.compact-camera-panel,
+.compact-settings-card,
+.compact-settings-form,
+.compact-guide,
+.compact-stats,
+.compact-controls {
+  gap: 0.9rem;
+}
+
+.compact-controls .btn {
+  min-height: 52px;
+}
+
+.calibration-target.hidden {
+  display: none;
+}
+
+@media (max-width: 1200px) {
+  .compact-camera-stage {
+    grid-template-columns: 1fr;
+  }
+}

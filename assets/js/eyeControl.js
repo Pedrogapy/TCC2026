@@ -1,10 +1,16 @@
-const STORAGE_KEY = 'paa_eye_config_v3';
-const LONG_BLINK_MS = 1050;
-const TOGGLE_COOLDOWN_MS = 1800;
+const STORAGE_KEY = 'paa_eye_config_v4';
+const LONG_BLINK_MS = 1400;
+const TOGGLE_COOLDOWN_MS = 2200;
 const DWELL_MS = 7000;
-const DEADZONE = 0.12;
-const BLINK_CLOSE_RATIO = 0.12;
-const BLINK_OPEN_RATIO = 0.165;
+const DEADZONE_X = 0.09;
+const DEADZONE_Y = 0.08;
+const BLINK_CLOSE_RATIO = 0.105;
+const BLINK_OPEN_RATIO = 0.155;
+const AUTO_CENTER_CALIBRATION_MS = 2200;
+const AUTO_FACE_STABLE_MS = 700;
+const DEFAULT_HORIZONTAL_SPAN = 0.115;
+const DEFAULT_EYE_VERTICAL_SPAN = 0.09;
+const DEFAULT_PITCH_SPAN = 0.06;
 const VISION_BUNDLE_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs';
 const WASM_ROOT = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm';
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
@@ -36,14 +42,6 @@ const HEAD_POINTS = {
   chin: 152
 };
 
-const calibrationSteps = [
-  { key: 'neutral', title: 'Centro', description: 'Olhe para o centro do monitor sem mover a cabeça.', target: { x: 50, y: 50 } },
-  { key: 'left', title: 'Esquerda', description: 'Olhe o máximo que conseguir para a esquerda.', target: { x: 18, y: 50 } },
-  { key: 'right', title: 'Direita', description: 'Olhe o máximo que conseguir para a direita.', target: { x: 82, y: 50 } },
-  { key: 'up', title: 'Cima', description: 'Olhe para cima. Pode inclinar levemente o rosto se isso ajudar.', target: { x: 50, y: 18 } },
-  { key: 'down', title: 'Baixo', description: 'Olhe para baixo. Pode inclinar levemente o rosto se isso ajudar.', target: { x: 50, y: 82 } }
-];
-
 const state = {
   loading: false,
   cameraActive: false,
@@ -52,18 +50,19 @@ const state = {
   blinkText: 'Olhos abertos',
   blinkClosed: false,
   controlActive: false,
-  cursorVisible: false,
+  cursorVisible: true,
   calibrated: false,
-  calibrationText: 'Pendente',
+  calibrationText: 'Ajuste inicial pendente',
   calibrationProgress: 0,
-  sensitivity: 6,
-  smoothing: 6,
+  sensitivity: 4,
+  smoothing: 7,
   dwellMs: 0,
   targetLabel: 'Nenhum alvo',
   calibrationData: null,
   needsCalibration: true
 };
 
+let listeners = [];
 let videoEl;
 let cursorEl;
 let overlayEl;
@@ -72,8 +71,7 @@ let progressBarEl;
 let titleEl;
 let descEl;
 let badgeEl;
-
-let listeners = [];
+let placeholderEl;
 let faceLandmarker = null;
 let stream = null;
 let lastVideoTime = -1;
@@ -82,46 +80,16 @@ let lastToggleTime = 0;
 let blinkStartTime = 0;
 let blinkConsumed = false;
 let rafId = 0;
-let filteredGaze = { x: 0.5, y: 0.5, pitch: 0.5 };
+let filteredSample = { x: 0.5, y: 0.5, pitch: 0.5 };
+let currentRawSample = { x: 0.5, y: 0.5, pitch: 0.5 };
 let cursorPosition = { x: window.innerWidth * 0.5, y: window.innerHeight * 0.5 };
 let currentTarget = null;
 let dwellStart = 0;
-let calibrationSession = null;
-let currentRawSample = { x: 0.5, y: 0.5, pitch: 0.5 };
+let neutralCapture = null;
+let autoStartRequested = false;
 
 function emit() {
   listeners.forEach((listener) => listener(getEyeControlState()));
-}
-
-function loadStoredConfig() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    if (typeof stored.sensitivity === 'number') {
-      state.sensitivity = clamp(stored.sensitivity, 1, 10);
-    }
-    if (typeof stored.smoothing === 'number') {
-      state.smoothing = clamp(stored.smoothing, 1, 10);
-    }
-    if (stored.calibrationData) {
-      state.calibrationData = stored.calibrationData;
-      state.calibrated = true;
-      state.calibrationText = 'Concluída';
-      state.needsCalibration = false;
-    }
-  } catch {
-    // ignore invalid storage
-  }
-}
-
-function saveStoredConfig() {
-  localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({
-      sensitivity: state.sensitivity,
-      smoothing: state.smoothing,
-      calibrationData: state.calibrationData
-    })
-  );
 }
 
 function clamp(value, min, max) {
@@ -129,33 +97,56 @@ function clamp(value, min, max) {
 }
 
 function average(values) {
-  if (!values.length) {
-    return 0;
-  }
-  return values.reduce((total, value) => total + value, 0) / values.length;
+  if (!values.length) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function averagePoint(points) {
-  if (!points.length) {
-    return { x: 0.5, y: 0.5 };
-  }
-
-  return {
-    x: average(points.map((point) => point.x)),
-    y: average(points.map((point) => point.y))
-  };
+  if (!points.length) return { x: 0.5, y: 0.5 };
+  return { x: average(points.map((point) => point.x)), y: average(points.map((point) => point.y)) };
 }
 
 function averageSample(samples) {
-  if (!samples.length) {
-    return { x: 0.5, y: 0.5, pitch: 0.5 };
-  }
-
+  if (!samples.length) return { x: 0.5, y: 0.5, pitch: 0.5 };
   return {
     x: average(samples.map((sample) => sample.x)),
     y: average(samples.map((sample) => sample.y)),
     pitch: average(samples.map((sample) => sample.pitch))
   };
+}
+
+function loadStoredConfig() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    if (typeof stored.sensitivity === 'number') state.sensitivity = clamp(stored.sensitivity, 1, 10);
+    if (typeof stored.smoothing === 'number') state.smoothing = clamp(stored.smoothing, 1, 10);
+    if (stored.calibrationData) {
+      state.calibrationData = stored.calibrationData;
+      state.calibrated = true;
+      state.calibrationText = 'Ajuste salvo';
+      state.needsCalibration = false;
+      state.calibrationProgress = 100;
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function saveStoredConfig() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    sensitivity: state.sensitivity,
+    smoothing: state.smoothing,
+    calibrationData: state.calibrationData
+  }));
+}
+
+function clearStoredCalibration() {
+  state.calibrationData = null;
+  state.calibrated = false;
+  state.needsCalibration = true;
+  state.calibrationText = 'Ajuste inicial pendente';
+  state.calibrationProgress = 0;
+  saveStoredConfig();
 }
 
 function normalizeIris(landmarks, eye) {
@@ -181,7 +172,6 @@ function computeBlinkRatio(landmarks) {
   const leftHorizontal = Math.abs(landmarks[BLINK_POINTS.left.outer].x - landmarks[BLINK_POINTS.left.inner].x);
   const rightVertical = Math.abs(landmarks[BLINK_POINTS.right.top].y - landmarks[BLINK_POINTS.right.bottom].y);
   const rightHorizontal = Math.abs(landmarks[BLINK_POINTS.right.outer].x - landmarks[BLINK_POINTS.right.inner].x);
-
   const leftRatio = leftVertical / Math.max(leftHorizontal, 0.0001);
   const rightRatio = rightVertical / Math.max(rightHorizontal, 0.0001);
   return (leftRatio + rightRatio) / 2;
@@ -191,15 +181,11 @@ function computeHeadPitchMetric(landmarks) {
   const forehead = landmarks[HEAD_POINTS.forehead];
   const nose = landmarks[HEAD_POINTS.nose];
   const chin = landmarks[HEAD_POINTS.chin];
-
   return clamp((nose.y - forehead.y) / Math.max(chin.y - forehead.y, 0.0001), 0, 1);
 }
 
 function updateCursorVisual() {
-  if (!cursorEl) {
-    return;
-  }
-
+  if (!cursorEl) return;
   cursorEl.style.left = `${cursorPosition.x}px`;
   cursorEl.style.top = `${cursorPosition.y}px`;
   cursorEl.classList.toggle('hidden', !state.cursorVisible);
@@ -207,55 +193,45 @@ function updateCursorVisual() {
   cursorEl.classList.toggle('is-dwell', Boolean(currentTarget));
 }
 
-function updateOverlay(target, title, description, progress, badge) {
-  if (!overlayEl) {
-    return;
-  }
-
-  targetEl.style.left = `${target.x}%`;
-  targetEl.style.top = `${target.y}%`;
+function updateOverlay({ title, description, progress = 0, badge = 'Preparando', showTarget = false }) {
+  if (!overlayEl) return;
+  overlayEl.classList.remove('hidden');
   titleEl.textContent = title;
   descEl.textContent = description;
   badgeEl.textContent = badge;
-  progressBarEl.style.width = `${progress}%`;
+  progressBarEl.style.width = `${clamp(progress, 0, 100)}%`;
+  targetEl.classList.toggle('hidden', !showTarget);
+}
+
+function hideOverlay() {
+  if (!overlayEl) return;
+  overlayEl.classList.add('hidden');
 }
 
 function clearDwell() {
-  if (currentTarget) {
-    currentTarget.classList.remove('is-dwell');
-  }
+  if (currentTarget) currentTarget.classList.remove('is-dwell');
   currentTarget = null;
   dwellStart = 0;
   state.dwellMs = 0;
+  state.targetLabel = 'Nenhum alvo';
 }
 
 function isClickable(element) {
-  if (!element || !(element instanceof HTMLElement)) {
-    return false;
-  }
-
-  return Boolean(
-    element.closest(
-      'button, a, input, select, textarea, [data-eye-click], [role="button"], .nav-button, .btn, .test-target'
-    )
-  );
+  if (!element || !(element instanceof HTMLElement)) return false;
+  return Boolean(element.closest('button, a, input, select, textarea, [data-eye-click], [role="button"], .nav-button, .btn, .test-target'));
 }
 
 function handleDwell(now) {
   if (state.controlActive || !state.cursorVisible) {
     clearDwell();
-    emit();
     return;
   }
 
   const element = document.elementFromPoint(cursorPosition.x, cursorPosition.y);
-  const clickable = element?.closest(
-    'button, a, input, select, textarea, [data-eye-click], [role="button"], .nav-button, .btn, .test-target'
-  );
+  const clickable = element?.closest('button, a, input, select, textarea, [data-eye-click], [role="button"], .nav-button, .btn, .test-target');
 
   if (!isClickable(clickable)) {
     clearDwell();
-    emit();
     return;
   }
 
@@ -274,67 +250,23 @@ function handleDwell(now) {
     currentTarget.click();
     clearDwell();
   }
-
-  emit();
 }
 
-function toggleMode() {
-  if (!state.calibrated) {
-    state.controlActive = false;
-    emit();
-    return;
-  }
-
-  state.controlActive = !state.controlActive;
-  clearDwell();
-  emit();
-}
-
-function mapGazeToAxes(sample) {
+function mapSampleToAxes(sample) {
   const calibration = state.calibrationData;
-  if (!calibration) {
-    return { x: 0, y: 0 };
-  }
+  if (!calibration?.neutral) return { x: 0, y: 0 };
 
   const neutral = calibration.neutral;
-  const leftSpan = Math.max(neutral.x - calibration.left.x, 0.02);
-  const rightSpan = Math.max(calibration.right.x - neutral.x, 0.02);
-  const upSpan = Math.max(neutral.y - calibration.up.y, 0.02);
-  const downSpan = Math.max(calibration.down.y - neutral.y, 0.02);
+  const horizontalSpan = calibration.horizontalSpan || DEFAULT_HORIZONTAL_SPAN;
+  const eyeVerticalSpan = calibration.eyeVerticalSpan || DEFAULT_EYE_VERTICAL_SPAN;
+  const pitchSpan = calibration.pitchSpan || DEFAULT_PITCH_SPAN;
 
-  const pitchNeutral = neutral.pitch ?? 0.5;
-  const pitchUpSpan = Math.max(pitchNeutral - (calibration.up.pitch ?? pitchNeutral), 0.015);
-  const pitchDownSpan = Math.max((calibration.down.pitch ?? pitchNeutral) - pitchNeutral, 0.015);
+  const horizontal = clamp((sample.x - neutral.x) / horizontalSpan, -1.35, 1.35);
+  const eyeVertical = clamp((sample.y - neutral.y) / eyeVerticalSpan, -1.35, 1.35);
+  const headVertical = clamp((sample.pitch - neutral.pitch) / pitchSpan, -1.2, 1.2);
+  const vertical = clamp((eyeVertical * 0.82) + (headVertical * 0.35), -1.4, 1.4);
 
-  let x = 0;
-  let yEye = 0;
-  let yPitch = 0;
-
-  if (sample.x < neutral.x) {
-    x = -((neutral.x - sample.x) / leftSpan);
-  } else {
-    x = (sample.x - neutral.x) / rightSpan;
-  }
-
-  if (sample.y < neutral.y) {
-    yEye = -((neutral.y - sample.y) / upSpan);
-  } else {
-    yEye = (sample.y - neutral.y) / downSpan;
-  }
-
-  const currentPitch = sample.pitch ?? pitchNeutral;
-  if (currentPitch < pitchNeutral) {
-    yPitch = -((pitchNeutral - currentPitch) / pitchUpSpan);
-  } else {
-    yPitch = (currentPitch - pitchNeutral) / pitchDownSpan;
-  }
-
-  const vertical = clamp((yEye * 0.72) + (yPitch * 0.38), -1.35, 1.35);
-
-  return {
-    x: clamp(x, -1.25, 1.25),
-    y: vertical
-  };
+  return { x: horizontal, y: vertical };
 }
 
 function updateMovement(now) {
@@ -342,10 +274,9 @@ function updateMovement(now) {
   lastFrameTime = now;
 
   if (state.controlActive && state.calibrated) {
-    const mapped = mapGazeToAxes(filteredGaze);
-    const effectiveX = Math.abs(mapped.x) < DEADZONE ? 0 : mapped.x;
-    const effectiveY = Math.abs(mapped.y) < DEADZONE ? 0 : mapped.y;
-
+    const mapped = mapSampleToAxes(filteredSample);
+    const effectiveX = Math.abs(mapped.x) < DEADZONE_X ? 0 : mapped.x;
+    const effectiveY = Math.abs(mapped.y) < DEADZONE_Y ? 0 : mapped.y;
     const boost = 7 + state.sensitivity * 2.2;
     const speedX = Math.abs(effectiveX) * boost * 2.3;
     const speedY = Math.abs(effectiveY) * boost * 2.1;
@@ -358,6 +289,15 @@ function updateMovement(now) {
   }
 
   updateCursorVisual();
+}
+
+function toggleMode() {
+  if (!state.calibrated) {
+    state.controlActive = false;
+    return;
+  }
+  state.controlActive = !state.controlActive;
+  clearDwell();
 }
 
 function updateBlink(now, landmarks) {
@@ -386,36 +326,134 @@ function updateBlink(now, landmarks) {
   }
 }
 
-function feedCalibrationSample() {
-  if (!calibrationSession || !calibrationSession.collecting) {
+function resetNeutralCapture() {
+  neutralCapture = {
+    collecting: false,
+    stableSince: 0,
+    startedAt: 0,
+    samples: [],
+    autoStarted: false
+  };
+}
+
+function startNeutralCapture(now, autoStarted = false) {
+  resetNeutralCapture();
+  neutralCapture.collecting = true;
+  neutralCapture.startedAt = now;
+  neutralCapture.autoStarted = autoStarted;
+  state.controlActive = false;
+  state.calibrationText = 'Ajustando referência central';
+  state.calibrationProgress = 0;
+  updateOverlay({
+    title: 'Ajuste inicial automático',
+    description: 'Olhe para o centro do monitor por um instante. Direita/esquerda usam apenas os olhos. Cima/baixo usam olhos + leve inclinação do rosto.',
+    progress: 0,
+    badge: 'Ajustando',
+    showTarget: true
+  });
+}
+
+function finishNeutralCapture() {
+  if (!neutralCapture || neutralCapture.samples.length < 10) {
+    state.calibrationText = 'Rosto instável';
+    state.calibrationProgress = 0;
+    resetNeutralCapture();
     return;
   }
 
-  calibrationSession.samples.push({ ...currentRawSample });
+  const neutral = averageSample(neutralCapture.samples);
+  const xSpread = Math.max(...neutralCapture.samples.map((sample) => Math.abs(sample.x - neutral.x)), 0.025);
+  const ySpread = Math.max(...neutralCapture.samples.map((sample) => Math.abs(sample.y - neutral.y)), 0.02);
+  const pitchSpread = Math.max(...neutralCapture.samples.map((sample) => Math.abs(sample.pitch - neutral.pitch)), 0.015);
+
+  state.calibrationData = {
+    neutral,
+    horizontalSpan: clamp(xSpread * 5.8, 0.08, 0.16),
+    eyeVerticalSpan: clamp(ySpread * 6.8, 0.06, 0.14),
+    pitchSpan: clamp(pitchSpread * 7.2, 0.04, 0.09)
+  };
+  state.calibrated = true;
+  state.needsCalibration = false;
+  state.calibrationText = 'Ajuste concluído';
+  state.calibrationProgress = 100;
+  saveStoredConfig();
+  updateOverlay({
+    title: 'Ajuste concluído',
+    description: 'Agora direita/esquerda seguem principalmente os olhos, e cima/baixo combinam olhos com a inclinação do rosto.',
+    progress: 100,
+    badge: 'Pronto',
+    showTarget: false
+  });
+
+  setTimeout(() => {
+    hideOverlay();
+  }, 900);
+
+  resetNeutralCapture();
+}
+
+function maybeAutoCalibrate(now) {
+  if (!state.cameraActive || !state.faceDetected || state.calibrated) return;
+  if (!neutralCapture) resetNeutralCapture();
+
+  if (!neutralCapture.collecting) {
+    if (!neutralCapture.stableSince) neutralCapture.stableSince = now;
+    const stableFor = now - neutralCapture.stableSince;
+    const prepProgress = clamp((stableFor / AUTO_FACE_STABLE_MS) * 100, 0, 100);
+    state.calibrationText = 'Centralizando rosto';
+    state.calibrationProgress = prepProgress;
+    updateOverlay({
+      title: 'Preparando rastreamento',
+      description: 'Centralize o rosto. Assim que estiver estável, o ajuste inicial começa sozinho.',
+      progress: prepProgress,
+      badge: 'Preparando',
+      showTarget: true
+    });
+    if (stableFor >= AUTO_FACE_STABLE_MS) {
+      startNeutralCapture(now, true);
+    }
+    return;
+  }
+
+  neutralCapture.samples.push({ ...currentRawSample });
+  const progress = clamp(((now - neutralCapture.startedAt) / AUTO_CENTER_CALIBRATION_MS) * 100, 0, 100);
+  state.calibrationText = 'Ajustando referência central';
+  state.calibrationProgress = progress;
+  updateOverlay({
+    title: 'Ajuste inicial automático',
+    description: 'Continue olhando para o centro. O sistema está aprendendo sua referência neste monitor.',
+    progress,
+    badge: 'Lendo referência',
+    showTarget: true
+  });
+
+  if (now - neutralCapture.startedAt >= AUTO_CENTER_CALIBRATION_MS) {
+    finishNeutralCapture();
+  }
 }
 
 function processLandmarks(landmarks, now) {
   const left = normalizeIris(landmarks, LEFT_EYE);
   const right = normalizeIris(landmarks, RIGHT_EYE);
-  const headPitch = computeHeadPitchMetric(landmarks);
   const raw = {
     x: (left.x + right.x) / 2,
     y: (left.y + right.y) / 2,
-    pitch: headPitch
+    pitch: computeHeadPitchMetric(landmarks)
   };
 
   currentRawSample = raw;
 
   const blend = clamp(0.28 - state.smoothing * 0.02, 0.05, 0.2);
-  filteredGaze.x += (raw.x - filteredGaze.x) * blend;
-  filteredGaze.y += (raw.y - filteredGaze.y) * blend;
-  filteredGaze.pitch += (raw.pitch - filteredGaze.pitch) * Math.max(blend * 0.85, 0.04);
+  filteredSample.x += (raw.x - filteredSample.x) * blend;
+  filteredSample.y += (raw.y - filteredSample.y) * blend;
+  filteredSample.pitch += (raw.pitch - filteredSample.pitch) * Math.max(blend * 0.82, 0.04);
 
   state.faceDetected = true;
   state.trackingText = 'Rosto detectado';
+  if (placeholderEl) placeholderEl.classList.add('hidden');
 
   updateBlink(now, landmarks);
-  feedCalibrationSample();
+  maybeAutoCalibrate(now);
   updateMovement(now);
   emit();
 }
@@ -425,13 +463,12 @@ function clearTracking(message = 'Aguardando rosto') {
   state.trackingText = message;
   state.blinkText = 'Olhos abertos';
   clearDwell();
+  if (neutralCapture && !neutralCapture.collecting) neutralCapture.stableSince = 0;
   emit();
 }
 
 async function ensureLandmarker() {
-  if (faceLandmarker) {
-    return faceLandmarker;
-  }
+  if (faceLandmarker) return faceLandmarker;
 
   state.loading = true;
   state.trackingText = 'Carregando modelo';
@@ -439,12 +476,8 @@ async function ensureLandmarker() {
 
   const visionModule = await import(VISION_BUNDLE_URL);
   const filesetResolver = await visionModule.FilesetResolver.forVisionTasks(WASM_ROOT);
-
   faceLandmarker = await visionModule.FaceLandmarker.createFromOptions(filesetResolver, {
-    baseOptions: {
-      modelAssetPath: MODEL_URL,
-      delegate: 'GPU'
-    },
+    baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
     runningMode: 'VIDEO',
     numFaces: 1,
     outputFaceBlendshapes: false,
@@ -459,15 +492,11 @@ async function ensureLandmarker() {
 }
 
 function detectionLoop() {
-  if (!state.cameraActive || !videoEl || !faceLandmarker) {
-    return;
-  }
+  if (!state.cameraActive || !videoEl || !faceLandmarker) return;
 
   const now = performance.now();
-
   if (videoEl.readyState >= 2 && videoEl.currentTime !== lastVideoTime) {
     lastVideoTime = videoEl.currentTime;
-
     const result = faceLandmarker.detectForVideo(videoEl, now);
     const faceLandmarks = result?.faceLandmarks?.[0];
 
@@ -475,6 +504,15 @@ function detectionLoop() {
       processLandmarks(faceLandmarks, now);
     } else {
       clearTracking('Rosto não encontrado');
+      if (!state.calibrated) {
+        updateOverlay({
+          title: 'Posicione o rosto na câmera',
+          description: 'O ajuste inicial automático começa sozinho assim que o rosto for detectado com estabilidade.',
+          progress: 0,
+          badge: 'Aguardando',
+          showTarget: false
+        });
+      }
     }
   }
 
@@ -487,54 +525,6 @@ function startLoop() {
   rafId = requestAnimationFrame(detectionLoop);
 }
 
-async function runCalibrationStep(stepIndex) {
-  const step = calibrationSteps[stepIndex];
-  calibrationSession.stageIndex = stepIndex;
-  calibrationSession.samples = [];
-  calibrationSession.collecting = false;
-  state.calibrationText = `Calibrando: ${step.title}`;
-  state.calibrationProgress = (stepIndex / calibrationSteps.length) * 100;
-  emit();
-
-  updateOverlay(step.target, step.title, step.description, state.calibrationProgress, `Etapa ${stepIndex + 1} de ${calibrationSteps.length}`);
-  await wait(900);
-
-  calibrationSession.collecting = true;
-  const startedAt = performance.now();
-  const duration = 1200;
-
-  while (performance.now() - startedAt < duration) {
-    const localProgress = ((stepIndex + (performance.now() - startedAt) / duration) / calibrationSteps.length) * 100;
-    state.calibrationProgress = clamp(localProgress, 0, 100);
-    progressBarEl.style.width = `${state.calibrationProgress}%`;
-    await wait(80);
-  }
-
-  calibrationSession.collecting = false;
-
-  if (calibrationSession.samples.length < 6) {
-    throw new Error('A câmera não conseguiu coletar dados suficientes.');
-  }
-
-  calibrationSession.points[step.key] = averageSample(calibrationSession.samples);
-}
-
-async function finalizeCalibration() {
-  const data = calibrationSession.points;
-  state.calibrationData = data;
-  state.calibrated = true;
-  state.needsCalibration = false;
-  state.calibrationText = 'Concluída';
-  state.calibrationProgress = 100;
-  saveStoredConfig();
-  emit();
-  await wait(400);
-}
-
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export async function initEyeControl() {
   videoEl = document.getElementById('camera-preview');
   cursorEl = document.getElementById('virtual-cursor');
@@ -544,11 +534,11 @@ export async function initEyeControl() {
   titleEl = document.getElementById('calibration-title');
   descEl = document.getElementById('calibration-description');
   badgeEl = document.getElementById('calibration-step-badge');
+  placeholderEl = document.getElementById('camera-placeholder');
 
   loadStoredConfig();
-  state.cursorVisible = true;
-  cursorPosition = { x: window.innerWidth * 0.5, y: window.innerHeight * 0.5 };
   updateCursorVisual();
+  resetNeutralCapture();
   emit();
 
   window.addEventListener('resize', () => {
@@ -559,18 +549,11 @@ export async function initEyeControl() {
 }
 
 export async function requestCamera() {
-  if (state.cameraActive) {
-    return;
-  }
-
+  if (state.cameraActive) return;
   await ensureLandmarker();
 
   stream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      facingMode: 'user',
-      width: { ideal: 1280 },
-      height: { ideal: 720 }
-    },
+    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
     audio: false
   });
 
@@ -579,85 +562,65 @@ export async function requestCamera() {
   state.cameraActive = true;
   state.trackingText = 'Aguardando rosto';
   startLoop();
+  updateOverlay({
+    title: 'Preparando rastreamento',
+    description: 'A câmera já está ligada. Centralize o rosto e o ajuste inicial vai começar sozinho.',
+    progress: 0,
+    badge: 'Câmera ativa',
+    showTarget: true
+  });
   emit();
 }
 
+export async function autoRequestCameraOnStart() {
+  if (autoStartRequested || state.cameraActive) return;
+  autoStartRequested = true;
+  try {
+    await requestCamera();
+  } catch (error) {
+    state.trackingText = 'Permissão de câmera necessária';
+    emit();
+    throw error;
+  }
+}
+
 export function stopCamera() {
-  if (stream) {
-    stream.getTracks().forEach((track) => track.stop());
-  }
-
+  if (stream) stream.getTracks().forEach((track) => track.stop());
   stream = null;
-  if (videoEl) {
-    videoEl.srcObject = null;
-  }
-
+  if (videoEl) videoEl.srcObject = null;
   state.cameraActive = false;
   state.controlActive = false;
   clearTracking('Câmera desligada');
   cancelAnimationFrame(rafId);
+  resetNeutralCapture();
+  hideOverlay();
+  if (placeholderEl) placeholderEl.classList.remove('hidden');
   emit();
 }
 
 export async function startCalibration() {
-  if (!state.cameraActive) {
-    throw new Error('Ative a webcam antes de calibrar.');
-  }
-
-  if (!state.faceDetected) {
-    throw new Error('Aproxime o rosto da câmera e tente novamente.');
-  }
-
-  state.controlActive = false;
-  state.cursorVisible = false;
-  clearDwell();
-  calibrationSession = {
-    stageIndex: 0,
-    collecting: false,
-    samples: [],
-    points: {}
-  };
-
-  overlayEl.classList.remove('hidden');
+  if (!state.cameraActive) throw new Error('A câmera precisa estar ligada.');
+  if (!state.faceDetected) throw new Error('Posicione o rosto na câmera primeiro.');
+  clearStoredCalibration();
+  startNeutralCapture(performance.now(), false);
   emit();
-
-  try {
-    for (let index = 0; index < calibrationSteps.length; index += 1) {
-      await runCalibrationStep(index);
-    }
-
-    await finalizeCalibration();
-    updateOverlay({ x: 50, y: 50 }, 'Calibração concluída', 'Agora o sistema usa olhos e uma leve inclinação do rosto para reforçar cima e baixo neste monitor.', 100, 'Concluído');
-    await wait(900);
-  } finally {
-    overlayEl.classList.add('hidden');
-    state.cursorVisible = true;
-    calibrationSession = null;
-    updateCursorVisual();
-    emit();
-  }
 }
 
 export function toggleControlMode() {
   toggleMode();
+  emit();
 }
 
 export function toggleCursorVisibility() {
   state.cursorVisible = !state.cursorVisible;
-  if (!state.cursorVisible) {
-    clearDwell();
-  }
+  if (!state.cursorVisible) clearDwell();
   updateCursorVisual();
   emit();
 }
 
 export function updateEyeConfig(partial) {
-  if (typeof partial.sensitivity === 'number') {
-    state.sensitivity = clamp(partial.sensitivity, 1, 10);
-  }
-  if (typeof partial.smoothing === 'number') {
-    state.smoothing = clamp(partial.smoothing, 1, 10);
-  }
+  if (typeof partial.sensitivity === 'number') state.sensitivity = clamp(partial.sensitivity, 1, 10);
+  if (typeof partial.smoothing === 'number') state.smoothing = clamp(partial.smoothing, 1, 10);
   saveStoredConfig();
   emit();
 }

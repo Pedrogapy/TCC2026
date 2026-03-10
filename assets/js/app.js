@@ -1,6 +1,7 @@
 import {
   initEyeControl,
   requestCamera,
+  autoRequestCameraOnStart,
   stopCamera,
   startCalibration,
   toggleControlMode,
@@ -10,8 +11,8 @@ import {
   getEyeControlState
 } from './eyeControl.js';
 
-const STORAGE_KEY = 'paa_students_v2';
-const SESSION_KEY = 'paa_session_v2';
+const STORAGE_KEY = 'paa_students_v4';
+const SESSION_KEY = 'paa_session_v4';
 const DEFAULT_LOGIN = {
   email: 'admin@portal.local',
   password: '123456',
@@ -88,9 +89,9 @@ const pageMeta = {
     description: 'Cadastro e edição com um fluxo simples.'
   },
   accessibility: {
-    eyebrow: 'Acessibilidade',
-    title: 'Controle ocular',
-    description: 'Ative a câmera, calibre e valide o movimento antes de usar o portal.'
+    eyebrow: 'Ajuste inicial',
+    title: 'Rastreamento ocular',
+    description: 'A câmera abre no início. Direita/esquerda seguem os olhos. Cima/baixo combinam olhos com inclinação do rosto.'
   }
 };
 
@@ -124,7 +125,7 @@ const studentForm = document.getElementById('student-form');
 const studentFormTitle = document.getElementById('student-form-title');
 const cancelStudentForm = document.getElementById('cancel-student-form');
 const cameraPlaceholder = document.getElementById('camera-placeholder');
-const startCameraButton = document.getElementById('start-camera-button');
+const retryCameraButton = document.getElementById('start-camera-button');
 const stopCameraButton = document.getElementById('stop-camera-button');
 const startCalibrationButton = document.getElementById('start-calibration-button');
 const toggleModeButton = document.getElementById('toggle-mode-button');
@@ -149,6 +150,10 @@ async function boot() {
   bindEvents();
   subscribeEyeState(handleEyeStateChange);
   render();
+
+  autoRequestCameraOnStart().catch((error) => {
+    showToast('Permissão da webcam', getReadableError(error), true);
+  });
 }
 
 function bindEvents() {
@@ -157,6 +162,7 @@ function bindEvents() {
   dashboardOpenStudents.addEventListener('click', () => goTo('students'));
   openNewStudentButton.addEventListener('click', openCreateStudent);
   cancelStudentForm.addEventListener('click', () => goTo('students'));
+
   studentSearch.addEventListener('input', (event) => {
     state.search = event.target.value.trim().toLowerCase();
     renderStudents();
@@ -175,38 +181,38 @@ function bindEvents() {
 
   studentForm.addEventListener('submit', handleStudentSubmit);
 
-  startCameraButton.addEventListener('click', async () => {
+  retryCameraButton?.addEventListener('click', async () => {
     try {
       await requestCamera();
-      showToast('Webcam ativada', 'Agora faça a calibração guiada antes de usar o cursor.');
+      showToast('Webcam ativada', 'A câmera foi ligada novamente. O ajuste inicial começa sozinho quando o rosto estiver estável.');
     } catch (error) {
       showToast('Erro ao ativar a webcam', getReadableError(error), true);
     }
   });
 
-  stopCameraButton.addEventListener('click', () => {
+  stopCameraButton?.addEventListener('click', () => {
     stopCamera();
-    showToast('Webcam desligada', 'O controle ocular foi pausado.');
+    showToast('Webcam desligada', 'O rastreamento foi pausado.');
   });
 
-  startCalibrationButton.addEventListener('click', async () => {
+  startCalibrationButton?.addEventListener('click', async () => {
     try {
       await startCalibration();
-      showToast('Calibração concluída', 'Agora o sistema usa olhos e uma leve inclinação do rosto para reforçar o eixo vertical.');
+      showToast('Refazendo ajuste', 'Olhe para o centro por um instante para atualizar a referência do seu monitor.');
     } catch (error) {
-      showToast('Não foi possível calibrar', getReadableError(error), true);
+      showToast('Não foi possível refazer o ajuste', getReadableError(error), true);
     }
   });
 
-  toggleModeButton.addEventListener('click', () => {
+  toggleModeButton?.addEventListener('click', () => {
     toggleControlMode();
   });
 
-  toggleCursorButton.addEventListener('click', () => {
+  toggleCursorButton?.addEventListener('click', () => {
     toggleCursorVisibility();
   });
 
-  eyeSettingsForm.addEventListener('input', () => {
+  eyeSettingsForm?.addEventListener('input', () => {
     const data = new FormData(eyeSettingsForm);
     const sensitivity = Number(data.get('sensitivity'));
     const smoothing = Number(data.get('smoothing'));
@@ -217,18 +223,14 @@ function bindEvents() {
 
   document.addEventListener('click', (event) => {
     const actionButton = event.target.closest('[data-action]');
-    if (!actionButton) {
-      return;
-    }
+    if (!actionButton) return;
 
     const id = actionButton.dataset.id;
     const action = actionButton.dataset.action;
-
     if (action === 'edit') {
       openEditStudent(id);
       return;
     }
-
     if (action === 'delete') {
       deleteStudent(id);
     }
@@ -244,17 +246,22 @@ function bindEvents() {
 
 function handleEyeStateChange(eyeState) {
   cameraStatusPill.textContent = eyeState.cameraActive ? 'Câmera ligada' : 'Câmera desligada';
-  calibrationStatusPill.textContent = eyeState.calibrated ? 'Calibração concluída' : 'Calibração pendente';
+  calibrationStatusPill.textContent = eyeState.calibrated ? 'Ajuste concluído' : eyeState.calibrationText;
   modeStatusPill.textContent = eyeState.controlActive ? 'Modo mover' : 'Modo pausado';
   modeStatusPill.classList.toggle('success', !eyeState.controlActive);
+
   cameraStateLabel.textContent = eyeState.cameraActive ? 'Ligada' : 'Desligada';
   trackingStateLabel.textContent = eyeState.trackingText;
   blinkStateLabel.textContent = eyeState.blinkText;
   dwellStateLabel.textContent = `${(eyeState.dwellMs / 1000).toFixed(1)}s / 7.0s`;
   cameraPlaceholder.classList.toggle('hidden', eyeState.cameraActive);
 
-  startCalibrationButton.disabled = !eyeState.cameraActive;
-  toggleModeButton.disabled = !eyeState.calibrated;
+  if (retryCameraButton) retryCameraButton.classList.toggle('hidden', eyeState.cameraActive);
+  if (stopCameraButton) stopCameraButton.classList.toggle('hidden', !eyeState.cameraActive);
+  if (startCalibrationButton) startCalibrationButton.disabled = !(eyeState.cameraActive && eyeState.faceDetected);
+  if (toggleModeButton) toggleModeButton.disabled = !eyeState.calibrated;
+  if (toggleModeButton) toggleModeButton.textContent = eyeState.controlActive ? 'Pausar cursor' : 'Mover cursor';
+  if (toggleCursorButton) toggleCursorButton.textContent = eyeState.cursorVisible ? 'Ocultar cursor' : 'Mostrar cursor';
 
   renderDashboardAccessibility(eyeState);
 }
@@ -265,7 +272,6 @@ function loadStudents() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_STUDENTS));
     return [...DEFAULT_STUDENTS];
   }
-
   try {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) && parsed.length ? parsed : [...DEFAULT_STUDENTS];
@@ -307,6 +313,7 @@ function handleLogin(event) {
 
   state.session = { name: DEFAULT_LOGIN.name, email };
   saveSession(state.session);
+  state.route = getEyeControlState().calibrated ? 'dashboard' : 'accessibility';
   render();
 }
 
@@ -331,17 +338,9 @@ function goTo(route) {
     button.classList.toggle('active', routeToNav[route] === button.dataset.route);
   });
 
-  if (route === 'students') {
-    renderStudents();
-  }
-
-  if (route === 'student-form') {
-    fillStudentForm();
-  }
-
-  if (route === 'dashboard') {
-    renderDashboard();
-  }
+  if (route === 'students') renderStudents();
+  if (route === 'student-form') fillStudentForm();
+  if (route === 'dashboard') renderDashboard();
 }
 
 function render() {
@@ -349,8 +348,10 @@ function render() {
   loginOverlay.classList.toggle('hidden', authenticated);
   appShell.classList.toggle('hidden', !authenticated);
 
-  if (!authenticated) {
-    return;
+  if (!authenticated) return;
+
+  if (!getEyeControlState().calibrated && state.route === 'dashboard') {
+    state.route = 'accessibility';
   }
 
   sessionName.textContent = state.session.name;
@@ -393,8 +394,8 @@ function renderDashboard() {
 
 function renderDashboardAccessibility(eyeState) {
   dashboardAccessibilityList.innerHTML = [
-    summaryTemplate('Câmera', eyeState.cameraActive ? 'Ligada e pronta para rastrear.' : 'Ainda desligada.'),
-    summaryTemplate('Calibração', eyeState.calibrated ? 'Concluída para esta pessoa e este monitor.' : 'Ainda precisa ser feita.'),
+    summaryTemplate('Câmera', eyeState.cameraActive ? 'Ligada e pronta para rastrear.' : 'Permissão ainda não concedida.'),
+    summaryTemplate('Ajuste inicial', eyeState.calibrated ? 'Concluído para esta pessoa e este monitor.' : eyeState.calibrationText),
     summaryTemplate('Modo atual', eyeState.controlActive ? 'Movendo o cursor pelo olhar.' : 'Cursor pausado para leitura.')
   ].join('');
 }
@@ -402,22 +403,12 @@ function renderDashboardAccessibility(eyeState) {
 function renderStudents() {
   const query = state.search;
   const filtered = state.students.filter((student) => {
-    if (!query) {
-      return true;
-    }
-
-    return [student.name, student.registration, student.course, student.email]
-      .join(' ')
-      .toLowerCase()
-      .includes(query);
+    if (!query) return true;
+    return [student.name, student.registration, student.course, student.email].join(' ').toLowerCase().includes(query);
   });
 
   if (!filtered.length) {
-    studentsTableBody.innerHTML = `
-      <tr>
-        <td colspan="6" class="table-empty">Nenhum aluno encontrado.</td>
-      </tr>
-    `;
+    studentsTableBody.innerHTML = `<tr><td colspan="6" class="table-empty">Nenhum aluno encontrado.</td></tr>`;
     return;
   }
 
@@ -457,13 +448,10 @@ function openEditStudent(id) {
 
 function fillStudentForm() {
   const courseSelect = studentForm.elements.course;
-  if (!courseSelect.options.length) {
-    populateCourseSelect();
-  }
+  if (!courseSelect.options.length) populateCourseSelect();
 
   const student = state.students.find((item) => item.id === state.editingStudentId);
   studentFormTitle.textContent = student ? 'Editar aluno' : 'Novo aluno';
-
   studentForm.elements.name.value = student?.name || '';
   studentForm.elements.registration.value = student?.registration || '';
   studentForm.elements.email.value = student?.email || '';
@@ -481,7 +469,6 @@ function populateCourseSelect() {
 function handleStudentSubmit(event) {
   event.preventDefault();
   const data = new FormData(studentForm);
-
   const payload = {
     id: state.editingStudentId || crypto.randomUUID(),
     name: String(data.get('name') || '').trim(),
@@ -509,62 +496,69 @@ function handleStudentSubmit(event) {
 
 function deleteStudent(id) {
   const student = state.students.find((item) => item.id === id);
-  if (!student) {
-    return;
-  }
+  if (!student) return;
 
   const confirmed = window.confirm(`Deseja remover ${student.name}?`);
-  if (!confirmed) {
-    return;
-  }
+  if (!confirmed) return;
 
   state.students = state.students.filter((item) => item.id !== id);
   saveStudents();
   renderStudents();
   renderDashboard();
-  showToast('Aluno removido', `${student.name} foi removido da base local.`);
+  showToast('Aluno removido', 'O registro foi removido do portal local.');
 }
 
-function metricTemplate(label, value, hint) {
+function metricTemplate(label, value, helper) {
   return `
     <article class="metric-card">
-      <small>${label}</small>
+      <span>${label}</span>
       <strong>${value}</strong>
-      <small>${hint}</small>
+      <small>${helper}</small>
     </article>
   `;
 }
 
 function summaryTemplate(title, text) {
   return `
-    <div class="summary-item">
+    <article class="summary-item">
       <strong>${title}</strong>
       <span>${text}</span>
-    </div>
+    </article>
   `;
 }
 
 function statusBadge(status) {
-  const className = status === 'Ativo' ? 'is-active' : status === 'Pendente' ? 'is-pending' : 'is-trancado';
-  return `<span class="table-badge ${className}">${status}</span>`;
+  const tone =
+    status === 'Ativo' ? 'success' :
+    status === 'Pendente' ? 'warning' :
+    'neutral';
+
+  return `<span class="table-badge ${tone}">${status}</span>`;
+}
+
+function showToast(title, description, danger = false) {
+  const toast = document.createElement('article');
+  toast.className = `toast ${danger ? 'danger' : ''}`;
+  toast.innerHTML = `
+    <strong>${title}</strong>
+    <span>${description}</span>
+  `;
+  toastStack.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add('leaving');
+    setTimeout(() => toast.remove(), 260);
+  }, 3200);
 }
 
 function getReadableError(error) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return 'Tente novamente.';
-}
+  if (!error) return 'Erro desconhecido.';
+  const message = String(error.message || error);
 
-function showToast(title, text, isError = false) {
-  const toast = document.createElement('div');
-  toast.className = 'toast';
-  toast.innerHTML = `<strong>${title}</strong><span>${text}</span>`;
-  if (isError) {
-    toast.style.borderColor = 'rgba(255, 106, 122, 0.3)';
+  if (message.includes('Permission denied') || message.includes('NotAllowedError')) {
+    return 'Você precisa permitir o uso da webcam no navegador.';
   }
-  toastStack.appendChild(toast);
-  setTimeout(() => {
-    toast.remove();
-  }, 3600);
+  if (message.includes('NotFoundError')) {
+    return 'Nenhuma webcam compatível foi encontrada.';
+  }
+  return message;
 }
