@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'paa_eye_config_v5';
+const STORAGE_KEY = 'paa_eye_config_v6';
 const LONG_BLINK_MS = 1400;
 const TOGGLE_COOLDOWN_MS = 2200;
 const DWELL_MS = 7000;
@@ -10,7 +10,7 @@ const AUTO_CENTER_CALIBRATION_MS = 2200;
 const AUTO_FACE_STABLE_MS = 700;
 const DEFAULT_HORIZONTAL_SPAN = 0.115;
 const DEFAULT_EYE_VERTICAL_SPAN = 0.09;
-const DEFAULT_PITCH_SPAN = 0.06;
+const DEFAULT_PITCH_SPAN = 0.18;
 const VISION_BUNDLE_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs';
 const WASM_ROOT = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm';
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
@@ -120,13 +120,6 @@ function loadStoredConfig() {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
     if (typeof stored.sensitivity === 'number') state.sensitivity = clamp(stored.sensitivity, 1, 10);
     if (typeof stored.smoothing === 'number') state.smoothing = clamp(stored.smoothing, 1, 10);
-    if (stored.calibrationData) {
-      state.calibrationData = stored.calibrationData;
-      state.calibrated = true;
-      state.calibrationText = 'Ajuste salvo';
-      state.needsCalibration = false;
-      state.calibrationProgress = 100;
-    }
   } catch {
     // ignore
   }
@@ -135,8 +128,7 @@ function loadStoredConfig() {
 function saveStoredConfig() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     sensitivity: state.sensitivity,
-    smoothing: state.smoothing,
-    calibrationData: state.calibrationData
+    smoothing: state.smoothing
   }));
 }
 
@@ -144,7 +136,8 @@ function clearStoredCalibration() {
   state.calibrationData = null;
   state.calibrated = false;
   state.needsCalibration = true;
-  state.calibrationText = 'Ajuste inicial pendente';
+  state.controlActive = false;
+  state.calibrationText = 'Ajuste inicial da sessão pendente';
   state.calibrationProgress = 0;
   saveStoredConfig();
 }
@@ -181,7 +174,10 @@ function computeHeadPitchMetric(landmarks) {
   const forehead = landmarks[HEAD_POINTS.forehead];
   const nose = landmarks[HEAD_POINTS.nose];
   const chin = landmarks[HEAD_POINTS.chin];
-  return clamp((nose.y - forehead.y) / Math.max(chin.y - forehead.y, 0.0001), 0, 1);
+
+  const foreheadToNose = Math.abs(nose.y - forehead.y);
+  const noseToChin = Math.abs(chin.y - nose.y);
+  return clamp(noseToChin / Math.max(foreheadToNose, 0.0001), 0.45, 2.6);
 }
 
 function updateCursorVisual() {
@@ -262,9 +258,9 @@ function mapSampleToAxes(sample) {
   const pitchSpan = calibration.pitchSpan || DEFAULT_PITCH_SPAN;
 
   const horizontal = clamp((neutral.x - sample.x) / horizontalSpan, -1.35, 1.35);
-  const eyeVertical = clamp((sample.y - neutral.y) / eyeVerticalSpan, -1.35, 1.35);
-  const headVertical = clamp((sample.pitch - neutral.pitch) / pitchSpan, -1.2, 1.2);
-  const vertical = clamp((eyeVertical * 0.82) + (headVertical * 0.35), -1.4, 1.4);
+  const eyeVertical = clamp((sample.y - neutral.y) / eyeVerticalSpan, -1.45, 1.45);
+  const headVertical = clamp((sample.pitch - neutral.pitch) / pitchSpan, -1.4, 1.4);
+  const vertical = clamp((eyeVertical * 1.1) - (headVertical * 0.42), -1.55, 1.55);
 
   return { x: horizontal, y: vertical };
 }
@@ -277,9 +273,9 @@ function updateMovement(now) {
     const mapped = mapSampleToAxes(filteredSample);
     const effectiveX = Math.abs(mapped.x) < DEADZONE_X ? 0 : mapped.x;
     const effectiveY = Math.abs(mapped.y) < DEADZONE_Y ? 0 : mapped.y;
-    const boost = 4.4 + state.sensitivity * 1.15;
-    const speedX = Math.abs(effectiveX) * boost * 1.5;
-    const speedY = Math.abs(effectiveY) * boost * 1.38;
+    const boost = 2.8 + state.sensitivity * 0.7;
+    const speedX = Math.abs(effectiveX) * boost * 1.18;
+    const speedY = Math.abs(effectiveY) * boost * 1.04;
 
     cursorPosition.x = clamp(cursorPosition.x + effectiveX * speedX * dt, 18, window.innerWidth - 18);
     cursorPosition.y = clamp(cursorPosition.y + effectiveY * speedY * dt, 18, window.innerHeight - 18);
@@ -336,6 +332,16 @@ function resetNeutralCapture() {
   };
 }
 
+function prepareCalibrationSession(resetCursor = true) {
+  clearStoredCalibration();
+  resetNeutralCapture();
+  if (resetCursor) {
+    cursorPosition.x = window.innerWidth * 0.5;
+    cursorPosition.y = window.innerHeight * 0.5;
+    updateCursorVisual();
+  }
+}
+
 function startNeutralCapture(now, autoStarted = false) {
   resetNeutralCapture();
   neutralCapture.collecting = true;
@@ -346,7 +352,7 @@ function startNeutralCapture(now, autoStarted = false) {
   state.calibrationProgress = 0;
   updateOverlay({
     title: 'Ajuste inicial automático',
-    description: 'Olhe para o centro do monitor por um instante. Direita/esquerda usam apenas os olhos. Cima/baixo usam olhos + leve inclinação do rosto.',
+    description: 'Olhe para o centro do monitor por um instante. Direita/esquerda usam apenas os olhos. Cima/baixo usam olhos + inclinação vertical do rosto.',
     progress: 0,
     badge: 'Ajustando',
     showTarget: true
@@ -368,9 +374,9 @@ function finishNeutralCapture() {
 
   state.calibrationData = {
     neutral,
-    horizontalSpan: clamp(xSpread * 5.8, 0.08, 0.16),
-    eyeVerticalSpan: clamp(ySpread * 6.8, 0.06, 0.14),
-    pitchSpan: clamp(pitchSpread * 7.2, 0.04, 0.09)
+    horizontalSpan: clamp(xSpread * 5.2, 0.075, 0.15),
+    eyeVerticalSpan: clamp(ySpread * 8.4, 0.05, 0.16),
+    pitchSpan: clamp(pitchSpread * 11.5, 0.08, 0.28)
   };
   state.calibrated = true;
   state.needsCalibration = false;
@@ -404,7 +410,7 @@ function maybeAutoCalibrate(now) {
     state.calibrationProgress = prepProgress;
     updateOverlay({
       title: 'Preparando rastreamento',
-      description: 'Centralize o rosto. Assim que estiver estável, o ajuste inicial começa sozinho.',
+      description: 'Centralize o rosto e olhe para o meio do monitor. Assim que estiver estável, o ajuste inicial começa sozinho.',
       progress: prepProgress,
       badge: 'Preparando',
       showTarget: true
@@ -446,7 +452,7 @@ function processLandmarks(landmarks, now) {
   const blend = clamp(0.28 - state.smoothing * 0.02, 0.05, 0.2);
   filteredSample.x += (raw.x - filteredSample.x) * blend;
   filteredSample.y += (raw.y - filteredSample.y) * blend;
-  filteredSample.pitch += (raw.pitch - filteredSample.pitch) * Math.max(blend * 0.82, 0.04);
+  filteredSample.pitch += (raw.pitch - filteredSample.pitch) * Math.max(blend * 0.7, 0.03);
 
   state.faceDetected = true;
   state.trackingText = 'Rosto detectado';
@@ -463,7 +469,13 @@ function clearTracking(message = 'Aguardando rosto') {
   state.trackingText = message;
   state.blinkText = 'Olhos abertos';
   clearDwell();
-  if (neutralCapture && !neutralCapture.collecting) neutralCapture.stableSince = 0;
+  if (neutralCapture?.collecting) {
+    resetNeutralCapture();
+    state.calibrationText = 'Rosto perdido durante o ajuste';
+    state.calibrationProgress = 0;
+  } else if (neutralCapture) {
+    neutralCapture.stableSince = 0;
+  }
   emit();
 }
 
@@ -538,7 +550,7 @@ export async function initEyeControl() {
 
   loadStoredConfig();
   updateCursorVisual();
-  resetNeutralCapture();
+  prepareCalibrationSession(true);
   emit();
 
   window.addEventListener('resize', () => {
@@ -561,10 +573,11 @@ export async function requestCamera() {
   await videoEl.play();
   state.cameraActive = true;
   state.trackingText = 'Aguardando rosto';
+  prepareCalibrationSession(true);
   startLoop();
   updateOverlay({
     title: 'Preparando rastreamento',
-    description: 'A câmera já está ligada. Centralize o rosto e o ajuste inicial vai começar sozinho.',
+    description: 'A câmera já está ligada. Centralize o rosto e olhe para o meio do monitor. O ajuste inicial vai começar sozinho.',
     progress: 0,
     badge: 'Câmera ativa',
     showTarget: true
@@ -592,7 +605,7 @@ export function stopCamera() {
   state.controlActive = false;
   clearTracking('Câmera desligada');
   cancelAnimationFrame(rafId);
-  resetNeutralCapture();
+  prepareCalibrationSession(true);
   hideOverlay();
   if (placeholderEl) placeholderEl.classList.remove('hidden');
   emit();
@@ -601,7 +614,7 @@ export function stopCamera() {
 export async function startCalibration() {
   if (!state.cameraActive) throw new Error('A câmera precisa estar ligada.');
   if (!state.faceDetected) throw new Error('Posicione o rosto na câmera primeiro.');
-  clearStoredCalibration();
+  prepareCalibrationSession(true);
   startNeutralCapture(performance.now(), false);
   emit();
 }

@@ -11,9 +11,9 @@ import {
   getEyeControlState
 } from './eyeControl.js';
 
-const STORAGE_KEY = 'paa_students_v4';
-const SESSION_KEY = 'paa_session_v4';
-const TEST_PANEL_KEY = 'paa_test_panel_v5';
+const STORAGE_KEY = 'paa_students_v6';
+const SESSION_KEY = 'paa_session_v6';
+const TEST_PANEL_KEY = 'paa_test_panel_v6';
 const DEFAULT_LOGIN = {
   email: 'admin@portal.local',
   password: '123456',
@@ -92,7 +92,7 @@ const pageMeta = {
   accessibility: {
     eyebrow: 'Ajuste inicial',
     title: 'Rastreamento ocular',
-    description: 'A câmera abre no início. Direita/esquerda seguem os olhos. Cima/baixo combinam olhos com inclinação do rosto.'
+    description: 'A câmera abre no início. Direita/esquerda seguem os olhos. Cima/baixo combinam olhos com inclinação vertical do rosto.'
   }
 };
 
