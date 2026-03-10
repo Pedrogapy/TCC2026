@@ -1,265 +1,332 @@
-import { getConfig, saveConfig } from './storage.js';
-
-const TASKS_VISION_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs';
-const TASKS_WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm';
-const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
-const DWELL_TIME_MS = 7000;
+const STORAGE_KEY = 'paa_eye_config_v2';
 const LONG_BLINK_MS = 700;
-const TOGGLE_COOLDOWN_MS = 1400;
-const DEADZONE = 0.018;
+const TOGGLE_COOLDOWN_MS = 1200;
+const DWELL_MS = 7000;
+const DEADZONE = 0.12;
+const VISION_BUNDLE_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs';
+const WASM_ROOT = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm';
+const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
 
-const LEFT_EYE_INDICES = [33, 133, 159, 145, 160, 144, 158, 153];
-const RIGHT_EYE_INDICES = [362, 263, 386, 374, 385, 380, 387, 373];
-const LEFT_IRIS_INDICES = [468, 469, 470, 471, 472];
-const RIGHT_IRIS_INDICES = [473, 474, 475, 476, 477];
+const LEFT_EYE = {
+  outer: 33,
+  inner: 133,
+  top: 159,
+  bottom: 145,
+  iris: [468, 469, 470, 471, 472]
+};
 
-let mediaStream = null;
-let faceLandmarker = null;
-let filesetResolver = null;
-let visionModule = null;
-let cursorElement = null;
-let videoElement = null;
-let placeholderElement = null;
-let animationFrameId = null;
-let lastVideoTime = -1;
-let lastFrameStamp = performance.now();
-let blinkStartTime = 0;
-let lastToggleTime = 0;
-let blinkConsumed = false;
-let baselinePending = true;
-let hoveredTarget = null;
-let dwellStartTime = 0;
-let hoverOutlineElement = null;
-const subscribers = [];
+const RIGHT_EYE = {
+  outer: 362,
+  inner: 263,
+  top: 386,
+  bottom: 374,
+  iris: [473, 474, 475, 476, 477]
+};
 
-const storedConfig = getConfig();
-const eyeState = {
+const BLINK_POINTS = {
+  left: { top: 159, bottom: 145, outer: 33, inner: 133 },
+  right: { top: 386, bottom: 374, outer: 362, inner: 263 }
+};
+
+const calibrationSteps = [
+  { key: 'neutral', title: 'Centro', description: 'Olhe para o centro do monitor sem mover a cabeça.', target: { x: 50, y: 50 } },
+  { key: 'left', title: 'Esquerda', description: 'Olhe o máximo que conseguir para a esquerda.', target: { x: 18, y: 50 } },
+  { key: 'right', title: 'Direita', description: 'Olhe o máximo que conseguir para a direita.', target: { x: 82, y: 50 } },
+  { key: 'up', title: 'Cima', description: 'Olhe para cima usando apenas os olhos.', target: { x: 50, y: 18 } },
+  { key: 'down', title: 'Baixo', description: 'Olhe para baixo usando apenas os olhos.', target: { x: 50, y: 82 } }
+];
+
+const state = {
   loading: false,
   cameraActive: false,
-  cameraReady: false,
   faceDetected: false,
-  controlMode: storedConfig.controlMode || 'paused',
-  cursorVisible: Boolean(storedConfig.cursorVisible),
-  gazeX: 0.5,
-  gazeY: 0.5,
+  trackingText: 'Aguardando câmera',
+  blinkText: 'Olhos abertos',
   blinkClosed: false,
-  dwellProgress: 0,
-  sensitivity: Number(storedConfig.sensitivity || 6),
-  dwellTime: DWELL_TIME_MS,
-  smoothing: Number(storedConfig.smoothing || 7),
-  trackingMessage: 'Aguardando webcam',
-  baseline: null
+  controlActive: false,
+  cursorVisible: false,
+  calibrated: false,
+  calibrationText: 'Pendente',
+  calibrationProgress: 0,
+  sensitivity: 6,
+  smoothing: 6,
+  dwellMs: 0,
+  targetLabel: 'Nenhum alvo',
+  calibrationData: null,
+  needsCalibration: true
 };
 
-let currentPosition = {
-  x: window.innerWidth * 0.52,
-  y: window.innerHeight * 0.52
-};
+let videoEl;
+let cursorEl;
+let overlayEl;
+let targetEl;
+let progressBarEl;
+let titleEl;
+let descEl;
+let badgeEl;
 
-let filteredGaze = {
-  x: 0.5,
-  y: 0.5
-};
+let listeners = [];
+let faceLandmarker = null;
+let stream = null;
+let lastVideoTime = -1;
+let lastFrameTime = performance.now();
+let lastToggleTime = 0;
+let blinkStartTime = 0;
+let blinkConsumed = false;
+let rafId = 0;
+let filteredGaze = { x: 0.5, y: 0.5 };
+let cursorPosition = { x: window.innerWidth * 0.5, y: window.innerHeight * 0.5 };
+let currentTarget = null;
+let dwellStart = 0;
+let calibrationSession = null;
+let currentRawGaze = { x: 0.5, y: 0.5 };
 
-function notifyState() {
-  subscribers.forEach((listener) => listener({ ...eyeState }));
+function emit() {
+  listeners.forEach((listener) => listener(getEyeControlState()));
+}
+
+function loadStoredConfig() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    if (typeof stored.sensitivity === 'number') {
+      state.sensitivity = clamp(stored.sensitivity, 1, 10);
+    }
+    if (typeof stored.smoothing === 'number') {
+      state.smoothing = clamp(stored.smoothing, 1, 10);
+    }
+    if (stored.calibrationData) {
+      state.calibrationData = stored.calibrationData;
+      state.calibrated = true;
+      state.calibrationText = 'Concluída';
+      state.needsCalibration = false;
+    }
+  } catch {
+    // ignore invalid storage
+  }
+}
+
+function saveStoredConfig() {
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      sensitivity: state.sensitivity,
+      smoothing: state.smoothing,
+      calibrationData: state.calibrationData
+    })
+  );
 }
 
 function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
+  return Math.min(Math.max(value, min), max);
 }
 
-function distance(a, b) {
-  return Math.hypot((a.x ?? 0) - (b.x ?? 0), (a.y ?? 0) - (b.y ?? 0));
+function average(values) {
+  if (!values.length) {
+    return 0;
+  }
+  return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
-function averagePoint(landmarks, indices) {
-  const points = indices.map((index) => landmarks[index]).filter(Boolean);
-  const total = points.reduce(
-    (acc, point) => {
-      acc.x += point.x;
-      acc.y += point.y;
-      return acc;
-    },
-    { x: 0, y: 0 }
-  );
+function averagePoint(points) {
+  if (!points.length) {
+    return { x: 0.5, y: 0.5 };
+  }
 
   return {
-    x: total.x / points.length,
-    y: total.y / points.length
+    x: average(points.map((point) => point.x)),
+    y: average(points.map((point) => point.y))
   };
 }
 
-function getEyeBounds(landmarks, indices) {
-  const points = indices.map((index) => landmarks[index]).filter(Boolean);
-  return {
-    minX: Math.min(...points.map((point) => point.x)),
-    maxX: Math.max(...points.map((point) => point.x)),
-    minY: Math.min(...points.map((point) => point.y)),
-    maxY: Math.max(...points.map((point) => point.y))
-  };
-}
+function normalizeIris(landmarks, eye) {
+  const outer = landmarks[eye.outer];
+  const inner = landmarks[eye.inner];
+  const top = landmarks[eye.top];
+  const bottom = landmarks[eye.bottom];
+  const irisCenter = averagePoint(eye.iris.map((index) => landmarks[index]));
 
-function normalizeIrisPosition(landmarks, eyeIndices, irisIndices) {
-  const iris = averagePoint(landmarks, irisIndices);
-  const bounds = getEyeBounds(landmarks, eyeIndices);
-  const width = Math.max(bounds.maxX - bounds.minX, 0.0001);
-  const height = Math.max(bounds.maxY - bounds.minY, 0.0001);
+  const minX = Math.min(outer.x, inner.x);
+  const maxX = Math.max(outer.x, inner.x);
+  const minY = Math.min(top.y, bottom.y);
+  const maxY = Math.max(top.y, bottom.y);
 
   return {
-    x: clamp((iris.x - bounds.minX) / width, 0, 1),
-    y: clamp((iris.y - bounds.minY) / height, 0, 1)
+    x: clamp((irisCenter.x - minX) / Math.max(maxX - minX, 0.0001), 0, 1),
+    y: clamp((irisCenter.y - minY) / Math.max(maxY - minY, 0.0001), 0, 1)
   };
 }
 
 function computeBlinkRatio(landmarks) {
-  const leftOpen = distance(landmarks[159], landmarks[145]) / Math.max(distance(landmarks[33], landmarks[133]), 0.0001);
-  const rightOpen = distance(landmarks[386], landmarks[374]) / Math.max(distance(landmarks[362], landmarks[263]), 0.0001);
-  return (leftOpen + rightOpen) / 2;
+  const leftVertical = Math.abs(landmarks[BLINK_POINTS.left.top].y - landmarks[BLINK_POINTS.left.bottom].y);
+  const leftHorizontal = Math.abs(landmarks[BLINK_POINTS.left.outer].x - landmarks[BLINK_POINTS.left.inner].x);
+  const rightVertical = Math.abs(landmarks[BLINK_POINTS.right.top].y - landmarks[BLINK_POINTS.right.bottom].y);
+  const rightHorizontal = Math.abs(landmarks[BLINK_POINTS.right.outer].x - landmarks[BLINK_POINTS.right.inner].x);
+
+  const leftRatio = leftVertical / Math.max(leftHorizontal, 0.0001);
+  const rightRatio = rightVertical / Math.max(rightHorizontal, 0.0001);
+  return (leftRatio + rightRatio) / 2;
 }
 
 function updateCursorVisual() {
-  if (!cursorElement) return;
-
-  cursorElement.style.transform = `translate(${currentPosition.x}px, ${currentPosition.y}px)`;
-  cursorElement.classList.toggle('visible', eyeState.cursorVisible);
-}
-
-function resetHoverOutline() {
-  if (hoverOutlineElement) {
-    hoverOutlineElement.style.outline = '';
-    hoverOutlineElement.style.outlineOffset = '';
-    hoverOutlineElement = null;
+  if (!cursorEl) {
+    return;
   }
+
+  cursorEl.style.left = `${cursorPosition.x}px`;
+  cursorEl.style.top = `${cursorPosition.y}px`;
+  cursorEl.classList.toggle('hidden', !state.cursorVisible);
+  cursorEl.classList.toggle('paused', !state.controlActive);
+  cursorEl.classList.toggle('is-dwell', Boolean(currentTarget));
 }
 
-function highlightHoverTarget(element) {
-  if (hoverOutlineElement === element) return;
-  resetHoverOutline();
-  hoverOutlineElement = element;
-  hoverOutlineElement.style.outline = '2px solid rgba(127, 148, 255, 0.9)';
-  hoverOutlineElement.style.outlineOffset = '2px';
+function updateOverlay(target, title, description, progress, badge) {
+  if (!overlayEl) {
+    return;
+  }
+
+  targetEl.style.left = `${target.x}%`;
+  targetEl.style.top = `${target.y}%`;
+  titleEl.textContent = title;
+  descEl.textContent = description;
+  badgeEl.textContent = badge;
+  progressBarEl.style.width = `${progress}%`;
 }
 
-function resetDwell() {
-  eyeState.dwellProgress = 0;
-  hoveredTarget = null;
-  dwellStartTime = 0;
-  resetHoverOutline();
+function clearDwell() {
+  if (currentTarget) {
+    currentTarget.classList.remove('is-dwell');
+  }
+  currentTarget = null;
+  dwellStart = 0;
+  state.dwellMs = 0;
 }
 
-function findClickableTargetAtCursor() {
-  const element = document.elementFromPoint(currentPosition.x, currentPosition.y);
-  if (!element) return null;
+function isClickable(element) {
+  if (!element || !(element instanceof HTMLElement)) {
+    return false;
+  }
 
-  return element.closest(
-    'button, a, input, select, textarea, [data-route], [data-action], .nav-item, .quick-action-card, .target-button'
+  return Boolean(
+    element.closest(
+      'button, a, input, select, textarea, [data-eye-click], [role="button"], .nav-button, .btn, .test-target'
+    )
   );
 }
 
-function triggerAutoClick(element) {
-  if (!element) return;
-
-  if (typeof element.focus === 'function') {
-    element.focus({ preventScroll: true });
-  }
-
-  if (typeof element.click === 'function') {
-    element.click();
-  } else {
-    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  }
-}
-
-function updateDwell(now) {
-  if (!eyeState.cursorVisible || eyeState.controlMode !== 'paused') {
-    resetDwell();
+function handleDwell(now) {
+  if (state.controlActive || !state.cursorVisible) {
+    clearDwell();
+    emit();
     return;
   }
 
-  const target = findClickableTargetAtCursor();
-  if (!target) {
-    resetDwell();
+  const element = document.elementFromPoint(cursorPosition.x, cursorPosition.y);
+  const clickable = element?.closest(
+    'button, a, input, select, textarea, [data-eye-click], [role="button"], .nav-button, .btn, .test-target'
+  );
+
+  if (!isClickable(clickable)) {
+    clearDwell();
+    emit();
     return;
   }
 
-  if (target !== hoveredTarget) {
-    hoveredTarget = target;
-    dwellStartTime = now;
-    eyeState.dwellProgress = 0;
-    highlightHoverTarget(target);
-    return;
+  if (currentTarget !== clickable) {
+    clearDwell();
+    currentTarget = clickable;
+    currentTarget.classList.add('is-dwell');
+    dwellStart = now;
   }
 
-  eyeState.dwellProgress = now - dwellStartTime;
-  if (eyeState.dwellProgress >= eyeState.dwellTime) {
-    triggerAutoClick(target);
-    resetDwell();
-  }
-}
+  state.dwellMs = now - dwellStart;
+  state.targetLabel = (currentTarget.textContent || currentTarget.getAttribute('aria-label') || 'Alvo').trim();
 
-function setMode(mode) {
-  eyeState.controlMode = mode;
-  saveConfig({ controlMode: mode, cursorVisible: eyeState.cursorVisible });
-  if (mode === 'active') {
-    eyeState.cursorVisible = true;
-    baselinePending = true;
+  if (state.dwellMs >= DWELL_MS) {
+    currentTarget.classList.remove('is-dwell');
+    currentTarget.click();
+    clearDwell();
   }
-  resetDwell();
-  updateCursorVisual();
-  notifyState();
+
+  emit();
 }
 
 function toggleMode() {
-  setMode(eyeState.controlMode === 'active' ? 'paused' : 'active');
+  if (!state.calibrated) {
+    state.controlActive = false;
+    emit();
+    return;
+  }
+
+  state.controlActive = !state.controlActive;
+  clearDwell();
+  emit();
 }
 
-function applyGazeMovement(timestamp) {
-  if (!eyeState.faceDetected) {
-    resetDwell();
-    return;
+function mapGazeToAxes(gaze) {
+  const calibration = state.calibrationData;
+  if (!calibration) {
+    return { x: 0, y: 0 };
   }
 
-  if (eyeState.controlMode === 'active') {
-    resetDwell();
+  const neutral = calibration.neutral;
+  const leftSpan = Math.max(neutral.x - calibration.left.x, 0.02);
+  const rightSpan = Math.max(calibration.right.x - neutral.x, 0.02);
+  const upSpan = Math.max(neutral.y - calibration.up.y, 0.02);
+  const downSpan = Math.max(calibration.down.y - neutral.y, 0.02);
 
-    if (!eyeState.cursorVisible) {
-      eyeState.cursorVisible = true;
-      saveConfig({ cursorVisible: true });
-    }
+  let x = 0;
+  let y = 0;
 
-    if (baselinePending || !eyeState.baseline) {
-      eyeState.baseline = { x: eyeState.gazeX, y: eyeState.gazeY };
-      baselinePending = false;
-      updateCursorVisual();
-      return;
-    }
-
-    const deltaTime = Math.max(0.7, Math.min(2.4, (timestamp - lastFrameStamp) / 16.67));
-    const rawX = eyeState.baseline.x - eyeState.gazeX;
-    const rawY = eyeState.gazeY - eyeState.baseline.y;
-
-    const normX = Math.abs(rawX) < DEADZONE ? 0 : rawX - Math.sign(rawX) * DEADZONE;
-    const normY = Math.abs(rawY) < DEADZONE ? 0 : rawY - Math.sign(rawY) * DEADZONE;
-
-    const speedFactor = 18 + eyeState.sensitivity * 3.8;
-    currentPosition.x = clamp(currentPosition.x + normX * speedFactor * deltaTime, 12, window.innerWidth - 12);
-    currentPosition.y = clamp(currentPosition.y + normY * speedFactor * deltaTime, 12, window.innerHeight - 12);
-    updateCursorVisual();
-    return;
+  if (gaze.x < neutral.x) {
+    x = -((neutral.x - gaze.x) / leftSpan);
+  } else {
+    x = (gaze.x - neutral.x) / rightSpan;
   }
 
-  updateDwell(timestamp);
+  if (gaze.y < neutral.y) {
+    y = -((neutral.y - gaze.y) / upSpan);
+  } else {
+    y = (gaze.y - neutral.y) / downSpan;
+  }
+
+  return {
+    x: clamp(x, -1.25, 1.25),
+    y: clamp(y, -1.25, 1.25)
+  };
+}
+
+function updateMovement(now) {
+  const dt = clamp((now - lastFrameTime) / 16.67, 0.5, 2.2);
+  lastFrameTime = now;
+
+  if (state.controlActive && state.calibrated) {
+    const mapped = mapGazeToAxes(filteredGaze);
+    const effectiveX = Math.abs(mapped.x) < DEADZONE ? 0 : mapped.x;
+    const effectiveY = Math.abs(mapped.y) < DEADZONE ? 0 : mapped.y;
+
+    const boost = 7 + state.sensitivity * 2.2;
+    const speedX = Math.abs(effectiveX) * boost * 2.3;
+    const speedY = Math.abs(effectiveY) * boost * 2.1;
+
+    cursorPosition.x = clamp(cursorPosition.x + effectiveX * speedX * dt, 18, window.innerWidth - 18);
+    cursorPosition.y = clamp(cursorPosition.y + effectiveY * speedY * dt, 18, window.innerHeight - 18);
+    clearDwell();
+  } else {
+    handleDwell(now);
+  }
+
   updateCursorVisual();
 }
 
-function updateBlinkState(timestamp, landmarks) {
-  const blinkRatio = computeBlinkRatio(landmarks);
-  const isClosed = blinkRatio < 0.17;
-  eyeState.blinkClosed = isClosed;
+function updateBlink(now, landmarks) {
+  const ratio = computeBlinkRatio(landmarks);
+  const isClosed = ratio < 0.16;
+
+  state.blinkClosed = isClosed;
+  state.blinkText = isClosed ? 'Olhos fechados' : 'Olhos abertos';
 
   if (isClosed && !blinkStartTime) {
-    blinkStartTime = timestamp;
+    blinkStartTime = now;
     blinkConsumed = false;
   }
 
@@ -269,199 +336,260 @@ function updateBlinkState(timestamp, landmarks) {
     return;
   }
 
-  if (!blinkConsumed && timestamp - blinkStartTime >= LONG_BLINK_MS && timestamp - lastToggleTime >= TOGGLE_COOLDOWN_MS) {
+  if (!blinkConsumed && now - blinkStartTime >= LONG_BLINK_MS && now - lastToggleTime >= TOGGLE_COOLDOWN_MS) {
     blinkConsumed = true;
-    lastToggleTime = timestamp;
+    lastToggleTime = now;
     toggleMode();
   }
 }
 
-function processLandmarks(landmarks, timestamp) {
-  const leftIris = normalizeIrisPosition(landmarks, LEFT_EYE_INDICES, LEFT_IRIS_INDICES);
-  const rightIris = normalizeIrisPosition(landmarks, RIGHT_EYE_INDICES, RIGHT_IRIS_INDICES);
-  const rawGaze = {
-    x: (leftIris.x + rightIris.x) / 2,
-    y: (leftIris.y + rightIris.y) / 2
+function feedCalibrationSample() {
+  if (!calibrationSession || !calibrationSession.collecting) {
+    return;
+  }
+
+  calibrationSession.samples.push({ ...currentRawGaze });
+}
+
+function processLandmarks(landmarks, now) {
+  const left = normalizeIris(landmarks, LEFT_EYE);
+  const right = normalizeIris(landmarks, RIGHT_EYE);
+  const raw = {
+    x: (left.x + right.x) / 2,
+    y: (left.y + right.y) / 2
   };
 
-  const smoothingBlend = clamp(0.34 - eyeState.smoothing * 0.026, 0.06, 0.22);
-  filteredGaze.x += (rawGaze.x - filteredGaze.x) * smoothingBlend;
-  filteredGaze.y += (rawGaze.y - filteredGaze.y) * smoothingBlend;
+  currentRawGaze = raw;
 
-  eyeState.gazeX = filteredGaze.x;
-  eyeState.gazeY = filteredGaze.y;
-  eyeState.faceDetected = true;
-  eyeState.trackingMessage = 'Rosto detectado';
+  const blend = clamp(0.28 - state.smoothing * 0.02, 0.05, 0.2);
+  filteredGaze.x += (raw.x - filteredGaze.x) * blend;
+  filteredGaze.y += (raw.y - filteredGaze.y) * blend;
 
-  updateBlinkState(timestamp, landmarks);
-  applyGazeMovement(timestamp);
+  state.faceDetected = true;
+  state.trackingText = 'Rosto detectado';
+
+  updateBlink(now, landmarks);
+  feedCalibrationSample();
+  updateMovement(now);
+  emit();
 }
 
-function clearTrackingState(message = 'Aguardando rosto') {
-  eyeState.faceDetected = false;
-  eyeState.trackingMessage = message;
-  eyeState.blinkClosed = false;
-  baselinePending = true;
-  resetDwell();
+function clearTracking(message = 'Aguardando rosto') {
+  state.faceDetected = false;
+  state.trackingText = message;
+  state.blinkText = 'Olhos abertos';
+  clearDwell();
+  emit();
 }
 
-async function ensureFaceLandmarker() {
+async function ensureLandmarker() {
   if (faceLandmarker) {
     return faceLandmarker;
   }
 
-  eyeState.loading = true;
-  notifyState();
+  state.loading = true;
+  state.trackingText = 'Carregando modelo';
+  emit();
 
-  if (!visionModule) {
-    visionModule = await import(TASKS_VISION_URL);
-  }
+  const visionModule = await import(VISION_BUNDLE_URL);
+  const filesetResolver = await visionModule.FilesetResolver.forVisionTasks(WASM_ROOT);
 
-  if (!filesetResolver) {
-    filesetResolver = await visionModule.FilesetResolver.forVisionTasks(TASKS_WASM_URL);
-  }
+  faceLandmarker = await visionModule.FaceLandmarker.createFromOptions(filesetResolver, {
+    baseOptions: {
+      modelAssetPath: MODEL_URL,
+      delegate: 'GPU'
+    },
+    runningMode: 'VIDEO',
+    numFaces: 1,
+    outputFaceBlendshapes: false,
+    minFaceDetectionConfidence: 0.5,
+    minFacePresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
 
-  try {
-    faceLandmarker = await visionModule.FaceLandmarker.createFromOptions(filesetResolver, {
-      baseOptions: {
-        modelAssetPath: MODEL_URL,
-        delegate: 'GPU'
-      },
-      outputFaceBlendshapes: false,
-      runningMode: 'VIDEO',
-      numFaces: 1
-    });
-  } catch {
-    faceLandmarker = await visionModule.FaceLandmarker.createFromOptions(filesetResolver, {
-      baseOptions: {
-        modelAssetPath: MODEL_URL,
-        delegate: 'CPU'
-      },
-      outputFaceBlendshapes: false,
-      runningMode: 'VIDEO',
-      numFaces: 1
-    });
-  }
-
-  eyeState.loading = false;
-  notifyState();
+  state.loading = false;
+  emit();
   return faceLandmarker;
 }
 
-function detectLoop() {
-  if (!videoElement || !faceLandmarker || !eyeState.cameraActive) {
+function detectionLoop() {
+  if (!state.cameraActive || !videoEl || !faceLandmarker) {
     return;
   }
 
   const now = performance.now();
-  if (videoElement.readyState >= 2 && videoElement.currentTime !== lastVideoTime) {
-    lastVideoTime = videoElement.currentTime;
-    const result = faceLandmarker.detectForVideo(videoElement, now);
 
-    if (result.faceLandmarks?.length) {
-      processLandmarks(result.faceLandmarks[0], now);
+  if (videoEl.readyState >= 2 && videoEl.currentTime !== lastVideoTime) {
+    lastVideoTime = videoEl.currentTime;
+
+    const result = faceLandmarker.detectForVideo(videoEl, now);
+    const faceLandmarks = result?.faceLandmarks?.[0];
+
+    if (faceLandmarks) {
+      processLandmarks(faceLandmarks, now);
     } else {
-      clearTrackingState('Rosto não encontrado');
-      applyGazeMovement(now);
+      clearTracking('Rosto não encontrado');
     }
-
-    notifyState();
   }
 
-  lastFrameStamp = now;
-  animationFrameId = requestAnimationFrame(detectLoop);
+  rafId = requestAnimationFrame(detectionLoop);
 }
 
-export function initEyeControl({ video, placeholder, cursor }) {
-  videoElement = video;
-  placeholderElement = placeholder;
-  cursorElement = cursor;
+function startLoop() {
+  cancelAnimationFrame(rafId);
+  lastFrameTime = performance.now();
+  rafId = requestAnimationFrame(detectionLoop);
+}
+
+async function runCalibrationStep(stepIndex) {
+  const step = calibrationSteps[stepIndex];
+  calibrationSession.stageIndex = stepIndex;
+  calibrationSession.samples = [];
+  calibrationSession.collecting = false;
+  state.calibrationText = `Calibrando: ${step.title}`;
+  state.calibrationProgress = (stepIndex / calibrationSteps.length) * 100;
+  emit();
+
+  updateOverlay(step.target, step.title, step.description, state.calibrationProgress, `Etapa ${stepIndex + 1} de ${calibrationSteps.length}`);
+  await wait(900);
+
+  calibrationSession.collecting = true;
+  const startedAt = performance.now();
+  const duration = 1200;
+
+  while (performance.now() - startedAt < duration) {
+    const localProgress = ((stepIndex + (performance.now() - startedAt) / duration) / calibrationSteps.length) * 100;
+    state.calibrationProgress = clamp(localProgress, 0, 100);
+    progressBarEl.style.width = `${state.calibrationProgress}%`;
+    await wait(80);
+  }
+
+  calibrationSession.collecting = false;
+
+  if (calibrationSession.samples.length < 6) {
+    throw new Error('A câmera não conseguiu coletar dados suficientes.');
+  }
+
+  calibrationSession.points[step.key] = averagePoint(calibrationSession.samples);
+}
+
+async function finalizeCalibration() {
+  const data = calibrationSession.points;
+  state.calibrationData = data;
+  state.calibrated = true;
+  state.needsCalibration = false;
+  state.calibrationText = 'Concluída';
+  state.calibrationProgress = 100;
+  saveStoredConfig();
+  emit();
+  await wait(400);
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function initEyeControl() {
+  videoEl = document.getElementById('camera-preview');
+  cursorEl = document.getElementById('virtual-cursor');
+  overlayEl = document.getElementById('calibration-overlay');
+  targetEl = document.getElementById('calibration-target');
+  progressBarEl = document.getElementById('calibration-progress-bar');
+  titleEl = document.getElementById('calibration-title');
+  descEl = document.getElementById('calibration-description');
+  badgeEl = document.getElementById('calibration-step-badge');
+
+  loadStoredConfig();
+  state.cursorVisible = true;
+  cursorPosition = { x: window.innerWidth * 0.5, y: window.innerHeight * 0.5 };
   updateCursorVisual();
+  emit();
+
   window.addEventListener('resize', () => {
-    currentPosition.x = clamp(currentPosition.x, 12, window.innerWidth - 12);
-    currentPosition.y = clamp(currentPosition.y, 12, window.innerHeight - 12);
+    cursorPosition.x = clamp(cursorPosition.x, 18, window.innerWidth - 18);
+    cursorPosition.y = clamp(cursorPosition.y, 18, window.innerHeight - 18);
     updateCursorVisual();
   });
-  notifyState();
-}
-
-export function subscribeEyeState(listener) {
-  subscribers.push(listener);
-  listener({ ...eyeState });
-  return () => {
-    const index = subscribers.indexOf(listener);
-    if (index >= 0) subscribers.splice(index, 1);
-  };
-}
-
-export function getEyeControlState() {
-  return { ...eyeState };
 }
 
 export async function requestCamera() {
-  if (!videoElement || !placeholderElement) {
-    throw new Error('A interface da webcam não foi inicializada.');
+  if (state.cameraActive) {
+    return;
   }
 
-  await ensureFaceLandmarker();
+  await ensureLandmarker();
 
-  if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error('Este navegador não suporta acesso à webcam.');
-  }
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: 'user',
+      width: { ideal: 1280 },
+      height: { ideal: 720 }
+    },
+    audio: false
+  });
 
-  if (!mediaStream) {
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: 'user',
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      },
-      audio: false
-    });
-  }
-
-  videoElement.srcObject = mediaStream;
-  videoElement.classList.add('active');
-  placeholderElement.style.display = 'none';
-  await videoElement.play();
-
-  eyeState.cameraActive = true;
-  eyeState.cameraReady = true;
-  eyeState.trackingMessage = 'Webcam ativa';
-  notifyState();
-
-  if (animationFrameId) {
-    cancelAnimationFrame(animationFrameId);
-  }
-  lastVideoTime = -1;
-  animationFrameId = requestAnimationFrame(detectLoop);
+  videoEl.srcObject = stream;
+  await videoEl.play();
+  state.cameraActive = true;
+  state.trackingText = 'Aguardando rosto';
+  startLoop();
+  emit();
 }
 
 export function stopCamera() {
-  if (animationFrameId) {
-    cancelAnimationFrame(animationFrameId);
-    animationFrameId = null;
+  if (stream) {
+    stream.getTracks().forEach((track) => track.stop());
   }
 
-  if (mediaStream) {
-    mediaStream.getTracks().forEach((track) => track.stop());
-    mediaStream = null;
+  stream = null;
+  if (videoEl) {
+    videoEl.srcObject = null;
   }
 
-  if (videoElement) {
-    videoElement.pause();
-    videoElement.srcObject = null;
-    videoElement.classList.remove('active');
+  state.cameraActive = false;
+  state.controlActive = false;
+  clearTracking('Câmera desligada');
+  cancelAnimationFrame(rafId);
+  emit();
+}
+
+export async function startCalibration() {
+  if (!state.cameraActive) {
+    throw new Error('Ative a webcam antes de calibrar.');
   }
 
-  if (placeholderElement) {
-    placeholderElement.style.display = 'grid';
+  if (!state.faceDetected) {
+    throw new Error('Aproxime o rosto da câmera e tente novamente.');
   }
 
-  eyeState.cameraActive = false;
-  eyeState.cameraReady = false;
-  clearTrackingState('Webcam desligada');
-  notifyState();
+  state.controlActive = false;
+  state.cursorVisible = false;
+  clearDwell();
+  calibrationSession = {
+    stageIndex: 0,
+    collecting: false,
+    samples: [],
+    points: {}
+  };
+
+  overlayEl.classList.remove('hidden');
+  emit();
+
+  try {
+    for (let index = 0; index < calibrationSteps.length; index += 1) {
+      await runCalibrationStep(index);
+    }
+
+    await finalizeCalibration();
+    updateOverlay({ x: 50, y: 50 }, 'Calibração concluída', 'Agora o sistema já sabe o que é esquerda, direita, cima e baixo para a sua câmera.', 100, 'Concluído');
+    await wait(900);
+  } finally {
+    overlayEl.classList.add('hidden');
+    state.cursorVisible = true;
+    calibrationSession = null;
+    updateCursorVisual();
+    emit();
+  }
 }
 
 export function toggleControlMode() {
@@ -469,18 +597,37 @@ export function toggleControlMode() {
 }
 
 export function toggleCursorVisibility() {
-  eyeState.cursorVisible = !eyeState.cursorVisible;
-  saveConfig({ cursorVisible: eyeState.cursorVisible });
-  if (!eyeState.cursorVisible) {
-    resetDwell();
+  state.cursorVisible = !state.cursorVisible;
+  if (!state.cursorVisible) {
+    clearDwell();
   }
   updateCursorVisual();
-  notifyState();
+  emit();
 }
 
 export function updateEyeConfig(partial) {
-  const next = saveConfig(partial);
-  eyeState.sensitivity = Number(next.sensitivity);
-  eyeState.smoothing = Number(next.smoothing);
-  notifyState();
+  if (typeof partial.sensitivity === 'number') {
+    state.sensitivity = clamp(partial.sensitivity, 1, 10);
+  }
+  if (typeof partial.smoothing === 'number') {
+    state.smoothing = clamp(partial.smoothing, 1, 10);
+  }
+  saveStoredConfig();
+  emit();
+}
+
+export function subscribeEyeState(listener) {
+  listeners.push(listener);
+  listener(getEyeControlState());
+  return () => {
+    listeners = listeners.filter((item) => item !== listener);
+  };
+}
+
+export function getEyeControlState() {
+  return {
+    ...state,
+    dwellMs: state.dwellMs,
+    targetLabel: state.targetLabel
+  };
 }

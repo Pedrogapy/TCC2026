@@ -1,66 +1,24 @@
 # Portal Acadêmico Acessível
 
-Protótipo web para TCC com foco em acessibilidade e rastreamento ocular usando webcam no navegador.
+Protótipo web para TCC com foco em acessibilidade e rastreamento ocular por webcam no navegador.
 
-## Objetivo
+## O que esta versão já faz
 
-Simular um software real de gestão acadêmica com:
-
-- login fictício
-- dashboard institucional
-- CRUD de alunos com persistência local
+- login fictício de demonstração
+- dashboard enxuto
+- CRUD local de alunos
 - painel de acessibilidade
-- webcam com rastreamento facial no navegador
-- cursor virtual controlado pelo olhar em modo relativo
-- alternância entre mover e pausar por piscada longa
-- clique automático ao permanecer 7 segundos sobre um elemento clicável
+- webcam no navegador
+- calibração guiada para esquerda, direita, cima e baixo
+- cursor virtual com movimento relativo ao olhar
+- piscada longa para alternar entre mover e pausar
+- clique automático por permanência de 7 segundos
 
-## Tecnologias
+## Acesso de demonstração
 
-- HTML
-- CSS
-- JavaScript modular
-- localStorage / sessionStorage
-- MediaPipe Tasks Vision via CDN
-- GitHub Pages
+- e-mail: `admin@portal.local`
+- senha: `123456`
 
-## Login de demonstração
+## Observação
 
-- E-mail: `admin@portal.local`
-- Senha: `123456`
-
-## Estrutura
-
-```txt
-assets/
-  css/styles.css
-  js/app.js
-  js/router.js
-  js/storage.js
-  js/mockData.js
-  js/ui.js
-  js/eyeControl.js
-docs/
-  planejamento.md
-index.html
-README.md
-```
-
-## Publicação no GitHub Pages
-
-O projeto é estático e pode ser publicado diretamente pela branch principal.
-
-## Observações da versão atual
-
-- O sistema já está visualmente pronto para demonstração.
-- O rastreamento ocular move o cursor virtual dentro do site.
-- O controle é relativo, parecido com joystick ocular.
-- A piscada longa alterna entre modo ativo e pausado.
-- O clique automático acontece apenas no modo pausado.
-
-## Próximas melhorias sugeridas
-
-- benchmark com tarefas guiadas
-- exportação de métricas em JSON/CSV
-- calibração leve ao iniciar o modo ativo
-- refinamento dos limiares de piscada e suavização
+A calibração deve ser feita antes de usar o controle ocular. Ela é salva localmente no navegador.
