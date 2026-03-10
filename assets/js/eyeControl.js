@@ -202,7 +202,7 @@ function handlePredictionWarmup(now) {
     state.calibrationProgress = 0;
     updateOverlay({
       title: 'Preparando rastreamento',
-      description: 'Mantenha o rosto visível na câmera e olhe para a tela. Se puder, faça alguns cliques olhando para os botões do portal.',
+      description: 'Mantenha o rosto visível na câmera e olhe para a tela. Se isso não sair daqui em poucos segundos, use Refazer rastreamento.',
       progress: 0,
       badge: 'Aguardando',
       showTarget: false
@@ -390,11 +390,9 @@ async function startWebgazerEngine() {
     // ignore
   }
 
-  try {
-    webgazer.setTracker?.('TFFacemesh');
-  } catch {
-    // ignore
-  }
+  // Não força o tracker TFFacemesh aqui.
+  // No GitHub Pages ele tentou buscar assets em /mediapipe/face_mesh/... e travou a inicialização.
+  // Deixa o WebGazer usar o tracker padrão desta build.
 
   webgazer
     .setGazeListener((data) => {
@@ -414,11 +412,22 @@ async function startWebgazerEngine() {
   instance?.showVideoPreview?.(false);
   instance?.showFaceOverlay?.(false);
   instance?.showFaceFeedbackBox?.(false);
+
+  const readyStart = performance.now();
+  while (!webgazer.isReady?.()) {
+    if (performance.now() - readyStart > 6000) {
+      throw new Error('O WebGazer não conseguiu inicializar a webcam corretamente.');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
+
   webgazerReady = true;
 
   const feedReadyStart = performance.now();
   while (!document.getElementById('webgazerVideoFeed')) {
-    if (performance.now() - feedReadyStart > 4000) break;
+    if (performance.now() - feedReadyStart > 6000) {
+      throw new Error('A câmera interna do WebGazer não apareceu na página.');
+    }
     await new Promise((resolve) => setTimeout(resolve, 60));
   }
 
@@ -509,7 +518,9 @@ export async function autoRequestCameraOnStart() {
   try {
     await requestCamera();
   } catch (error) {
-    state.trackingText = 'Permissão de câmera necessária';
+    state.trackingText = 'Falha ao abrir webcam';
+    state.cameraActive = false;
+    state.faceDetected = false;
     emit();
     throw error;
   }
