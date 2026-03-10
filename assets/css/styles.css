@@ -713,6 +713,39 @@ button,
   padding: 1rem;
 }
 
+.test-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem 0;
+}
+
+.test-panel-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.test-close-button {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.test-close-button:hover,
+.test-close-button.is-dwell {
+  border-color: rgba(123, 155, 255, 0.38);
+  background: rgba(92, 132, 255, 0.12);
+}
+
 .test-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

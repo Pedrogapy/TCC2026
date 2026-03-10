@@ -70,8 +70,8 @@
       <div class="sidebar-footer">
         <div class="compact-note">
           <span>Versão atual</span>
-          <strong>v0.4.0</strong>
-          <small>ajuste inicial automático</small>
+          <strong>v0.5.0</strong>
+          <small>eixo X corrigido e teste controlável</small>
         </div>
         <button class="btn btn-secondary btn-block" id="logout-button" type="button">Sair</button>
       </div>
@@ -325,7 +325,7 @@
           </div>
 
           <article class="card compact-test-card">
-            <details class="test-disclosure">
+            <details class="test-disclosure" id="test-disclosure">
               <summary>
                 <div>
                   <h2>Área de teste</h2>
@@ -333,6 +333,10 @@
                 </div>
                 <span class="badge soft">Opcional</span>
               </summary>
+              <div class="test-panel-head">
+                <p>Feche esta área quando terminar para ela não cobrir a navegação.</p>
+                <button class="test-close-button" id="close-test-panel" type="button" aria-label="Fechar área de teste">×</button>
+              </div>
               <div class="test-grid">
                 <button class="test-target" type="button" data-toast="Abrindo relatório de notas...">Relatório de notas</button>
                 <button class="test-target" type="button" data-toast="Abrindo histórico do aluno...">Histórico escolar</button>

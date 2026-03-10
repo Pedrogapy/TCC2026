@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'paa_eye_config_v4';
+const STORAGE_KEY = 'paa_eye_config_v5';
 const LONG_BLINK_MS = 1400;
 const TOGGLE_COOLDOWN_MS = 2200;
 const DWELL_MS = 7000;
@@ -54,8 +54,8 @@ const state = {
   calibrated: false,
   calibrationText: 'Ajuste inicial pendente',
   calibrationProgress: 0,
-  sensitivity: 4,
-  smoothing: 7,
+  sensitivity: 3,
+  smoothing: 8,
   dwellMs: 0,
   targetLabel: 'Nenhum alvo',
   calibrationData: null,
@@ -261,7 +261,7 @@ function mapSampleToAxes(sample) {
   const eyeVerticalSpan = calibration.eyeVerticalSpan || DEFAULT_EYE_VERTICAL_SPAN;
   const pitchSpan = calibration.pitchSpan || DEFAULT_PITCH_SPAN;
 
-  const horizontal = clamp((sample.x - neutral.x) / horizontalSpan, -1.35, 1.35);
+  const horizontal = clamp((neutral.x - sample.x) / horizontalSpan, -1.35, 1.35);
   const eyeVertical = clamp((sample.y - neutral.y) / eyeVerticalSpan, -1.35, 1.35);
   const headVertical = clamp((sample.pitch - neutral.pitch) / pitchSpan, -1.2, 1.2);
   const vertical = clamp((eyeVertical * 0.82) + (headVertical * 0.35), -1.4, 1.4);
@@ -277,9 +277,9 @@ function updateMovement(now) {
     const mapped = mapSampleToAxes(filteredSample);
     const effectiveX = Math.abs(mapped.x) < DEADZONE_X ? 0 : mapped.x;
     const effectiveY = Math.abs(mapped.y) < DEADZONE_Y ? 0 : mapped.y;
-    const boost = 7 + state.sensitivity * 2.2;
-    const speedX = Math.abs(effectiveX) * boost * 2.3;
-    const speedY = Math.abs(effectiveY) * boost * 2.1;
+    const boost = 4.4 + state.sensitivity * 1.15;
+    const speedX = Math.abs(effectiveX) * boost * 1.5;
+    const speedY = Math.abs(effectiveY) * boost * 1.38;
 
     cursorPosition.x = clamp(cursorPosition.x + effectiveX * speedX * dt, 18, window.innerWidth - 18);
     cursorPosition.y = clamp(cursorPosition.y + effectiveY * speedY * dt, 18, window.innerHeight - 18);

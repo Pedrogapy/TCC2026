@@ -13,6 +13,7 @@ import {
 
 const STORAGE_KEY = 'paa_students_v4';
 const SESSION_KEY = 'paa_session_v4';
+const TEST_PANEL_KEY = 'paa_test_panel_v5';
 const DEFAULT_LOGIN = {
   email: 'admin@portal.local',
   password: '123456',
@@ -141,14 +142,24 @@ const trackingStateLabel = document.getElementById('tracking-state-label');
 const blinkStateLabel = document.getElementById('blink-state-label');
 const dwellStateLabel = document.getElementById('dwell-state-label');
 const toastStack = document.getElementById('toast-stack');
+const testDisclosure = document.getElementById('test-disclosure');
+const closeTestPanelButton = document.getElementById('close-test-panel');
 
 boot();
 
 async function boot() {
   await initEyeControl();
   populateCourseSelect();
+  syncTestDisclosureFromStorage();
   bindEvents();
   subscribeEyeState(handleEyeStateChange);
+  const eyeState = getEyeControlState();
+  if (eyeSettingsForm) {
+    eyeSettingsForm.elements.sensitivity.value = String(eyeState.sensitivity);
+    eyeSettingsForm.elements.smoothing.value = String(eyeState.smoothing);
+  }
+  sensitivityLabel.textContent = String(eyeState.sensitivity);
+  smoothingLabel.textContent = String(eyeState.smoothing);
   render();
 
   autoRequestCameraOnStart().catch((error) => {
@@ -221,6 +232,16 @@ function bindEvents() {
     updateEyeConfig({ sensitivity, smoothing });
   });
 
+  testDisclosure?.addEventListener('toggle', () => {
+    localStorage.setItem(TEST_PANEL_KEY, testDisclosure.open ? 'open' : 'closed');
+  });
+
+  closeTestPanelButton?.addEventListener('click', () => {
+    if (!testDisclosure) return;
+    testDisclosure.open = false;
+    localStorage.setItem(TEST_PANEL_KEY, 'closed');
+  });
+
   document.addEventListener('click', (event) => {
     const actionButton = event.target.closest('[data-action]');
     if (!actionButton) return;
@@ -264,6 +285,13 @@ function handleEyeStateChange(eyeState) {
   if (toggleCursorButton) toggleCursorButton.textContent = eyeState.cursorVisible ? 'Ocultar cursor' : 'Mostrar cursor';
 
   renderDashboardAccessibility(eyeState);
+}
+
+
+function syncTestDisclosureFromStorage() {
+  if (!testDisclosure) return;
+  const state = localStorage.getItem(TEST_PANEL_KEY);
+  testDisclosure.open = state === 'open';
 }
 
 function loadStudents() {
