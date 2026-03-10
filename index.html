@@ -70,8 +70,8 @@
       <div class="sidebar-footer">
         <div class="compact-note">
           <span>Versão atual</span>
-          <strong>v0.2.0</strong>
-          <small>Layout enxuto + calibração guiada</small>
+          <strong>v0.3.0</strong>
+          <small>Pitch assist + interface mais limpa</small>
         </div>
         <button class="btn btn-secondary btn-block" id="logout-button" type="button">Sair</button>
       </div>
@@ -103,7 +103,7 @@
 
       <main class="content-area">
         <section class="route-section active" id="section-dashboard">
-          <div class="grid-cards grid-cards-4" id="dashboard-metrics"></div>
+          <div class="grid-cards grid-cards-3" id="dashboard-metrics"></div>
 
           <div class="two-column">
             <article class="card soft-card">
@@ -245,7 +245,7 @@
               <div class="card-head simple">
                 <div>
                   <h2>Configuração da câmera</h2>
-                  <p>A calibração vem antes do controle para corrigir a noção de cima, baixo, esquerda e direita.</p>
+                  <p>A calibração vem antes do controle e agora reforça o eixo vertical com olhos + leve inclinação do rosto.</p>
                 </div>
               </div>
 
@@ -289,8 +289,8 @@
             <article class="card settings-card">
               <div class="card-head simple">
                 <div>
-                  <h2>Ajustes de navegação</h2>
-                  <p>Menos controles, só os que realmente afetam o uso.</p>
+                  <h2>Ajustes essenciais</h2>
+                  <p>Só o que realmente interfere no uso do cursor.</p>
                 </div>
               </div>
 
@@ -307,40 +307,39 @@
                 </label>
               </form>
 
-              <div class="helper-list">
-                <div class="helper-item">
-                  <strong>Modo ativo</strong>
-                  <span>Olhar move o cursor como um joystick.</span>
+              <div class="quick-guide">
+                <div class="quick-guide-item">
+                  <strong>1. Calibre primeiro</strong>
+                  <span>O eixo vertical agora usa olhos e leve inclinação do rosto.</span>
                 </div>
-                <div class="helper-item">
-                  <strong>Modo pausado</strong>
-                  <span>O cursor para e você pode ler a tela sem arrastar nada.</span>
+                <div class="quick-guide-item">
+                  <strong>2. Pisque por mais tempo</strong>
+                  <span>A piscada longa alterna entre mover e pausar, agora com tolerância maior.</span>
                 </div>
-                <div class="helper-item">
-                  <strong>Piscada longa</strong>
-                  <span>Alterna entre ativo e pausado.</span>
-                </div>
-                <div class="helper-item">
-                  <strong>Clique automático</strong>
-                  <span>Fica 7 segundos sobre um botão no modo pausado.</span>
+                <div class="quick-guide-item">
+                  <strong>3. Teste só depois</strong>
+                  <span>A área de teste fica recolhida até você realmente precisar dela.</span>
                 </div>
               </div>
             </article>
           </div>
 
-          <article class="card">
-            <div class="card-head simple">
-              <div>
-                <h2>Área de teste</h2>
-                <p>Use esta tela para validar se o cursor está respondendo bem antes de navegar pelo sistema.</p>
+          <article class="card compact-test-card">
+            <details class="test-disclosure">
+              <summary>
+                <div>
+                  <h2>Área de teste</h2>
+                  <p>Abra somente quando quiser validar o cursor antes de navegar pelo sistema.</p>
+                </div>
+                <span class="badge soft">Opcional</span>
+              </summary>
+              <div class="test-grid">
+                <button class="test-target" type="button" data-toast="Abrindo relatório de notas...">Relatório de notas</button>
+                <button class="test-target" type="button" data-toast="Abrindo histórico do aluno...">Histórico escolar</button>
+                <button class="test-target" type="button" data-toast="Abrindo painel financeiro...">Painel financeiro</button>
+                <button class="test-target" type="button" data-toast="Abrindo matrícula online...">Matrícula online</button>
               </div>
-            </div>
-            <div class="test-grid">
-              <button class="test-target" type="button" data-toast="Abrindo relatório de notas...">Relatório de notas</button>
-              <button class="test-target" type="button" data-toast="Abrindo histórico do aluno...">Histórico escolar</button>
-              <button class="test-target" type="button" data-toast="Abrindo painel financeiro...">Painel financeiro</button>
-              <button class="test-target" type="button" data-toast="Abrindo matrícula online...">Matrícula online</button>
-            </div>
+            </details>
           </article>
         </section>
       </main>

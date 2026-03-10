@@ -22,3 +22,10 @@ Protótipo web para TCC com foco em acessibilidade e rastreamento ocular por web
 ## Observação
 
 A calibração deve ser feita antes de usar o controle ocular. Ela é salva localmente no navegador.
+
+
+## Ajustes da versão atual
+
+- calibração guiada com reforço do eixo vertical por leve inclinação do rosto
+- piscada longa menos sensível para alternar mover/pausar
+- área de teste recolhida para reduzir poluição visual

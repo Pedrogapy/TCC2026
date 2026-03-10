@@ -192,7 +192,7 @@ function bindEvents() {
   startCalibrationButton.addEventListener('click', async () => {
     try {
       await startCalibration();
-      showToast('Calibração concluída', 'Agora o eixo vertical e horizontal foram ajustados para a sua câmera.');
+      showToast('Calibração concluída', 'Agora o sistema usa olhos e uma leve inclinação do rosto para reforçar o eixo vertical.');
     } catch (error) {
       showToast('Não foi possível calibrar', getReadableError(error), true);
     }
@@ -362,17 +362,14 @@ function renderDashboard() {
   const total = state.students.length;
   const active = state.students.filter((student) => student.status === 'Ativo').length;
   const pending = state.students.filter((student) => student.status === 'Pendente').length;
-  const courses = new Set(state.students.map((student) => student.course)).size;
 
   dashboardMetrics.innerHTML = [
     metricTemplate('Total de alunos', String(total), 'Base local do portal'),
     metricTemplate('Ativos', String(active), 'Registros em situação regular'),
-    metricTemplate('Pendentes', String(pending), 'Revisões ainda em aberto'),
-    metricTemplate('Cursos', String(courses), 'Cursos representados na amostra')
+    metricTemplate('Pendentes', String(pending), 'Revisões ainda em aberto')
   ].join('');
 
   dashboardSummaryList.innerHTML = [
-    summaryTemplate('Tela enxuta', 'Os dados principais aparecem primeiro e o resto só quando necessário.'),
     summaryTemplate('Fluxo principal', 'Login, consulta de alunos, edição e acessibilidade já estão no protótipo.'),
     summaryTemplate('Persistência local', 'Os cadastros ficam salvos no navegador para a demonstração.')
   ].join('');
@@ -398,8 +395,7 @@ function renderDashboardAccessibility(eyeState) {
   dashboardAccessibilityList.innerHTML = [
     summaryTemplate('Câmera', eyeState.cameraActive ? 'Ligada e pronta para rastrear.' : 'Ainda desligada.'),
     summaryTemplate('Calibração', eyeState.calibrated ? 'Concluída para esta pessoa e este monitor.' : 'Ainda precisa ser feita.'),
-    summaryTemplate('Modo atual', eyeState.controlActive ? 'Movendo o cursor pelo olhar.' : 'Cursor pausado para leitura.'),
-    summaryTemplate('Rastreamento', eyeState.trackingText)
+    summaryTemplate('Modo atual', eyeState.controlActive ? 'Movendo o cursor pelo olhar.' : 'Cursor pausado para leitura.')
   ].join('');
 }
 

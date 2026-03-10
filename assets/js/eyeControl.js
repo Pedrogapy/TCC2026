@@ -1,8 +1,10 @@
-const STORAGE_KEY = 'paa_eye_config_v2';
-const LONG_BLINK_MS = 700;
-const TOGGLE_COOLDOWN_MS = 1200;
+const STORAGE_KEY = 'paa_eye_config_v3';
+const LONG_BLINK_MS = 1050;
+const TOGGLE_COOLDOWN_MS = 1800;
 const DWELL_MS = 7000;
 const DEADZONE = 0.12;
+const BLINK_CLOSE_RATIO = 0.12;
+const BLINK_OPEN_RATIO = 0.165;
 const VISION_BUNDLE_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs';
 const WASM_ROOT = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm';
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
@@ -28,12 +30,18 @@ const BLINK_POINTS = {
   right: { top: 386, bottom: 374, outer: 362, inner: 263 }
 };
 
+const HEAD_POINTS = {
+  forehead: 10,
+  nose: 1,
+  chin: 152
+};
+
 const calibrationSteps = [
   { key: 'neutral', title: 'Centro', description: 'Olhe para o centro do monitor sem mover a cabeça.', target: { x: 50, y: 50 } },
   { key: 'left', title: 'Esquerda', description: 'Olhe o máximo que conseguir para a esquerda.', target: { x: 18, y: 50 } },
   { key: 'right', title: 'Direita', description: 'Olhe o máximo que conseguir para a direita.', target: { x: 82, y: 50 } },
-  { key: 'up', title: 'Cima', description: 'Olhe para cima usando apenas os olhos.', target: { x: 50, y: 18 } },
-  { key: 'down', title: 'Baixo', description: 'Olhe para baixo usando apenas os olhos.', target: { x: 50, y: 82 } }
+  { key: 'up', title: 'Cima', description: 'Olhe para cima. Pode inclinar levemente o rosto se isso ajudar.', target: { x: 50, y: 18 } },
+  { key: 'down', title: 'Baixo', description: 'Olhe para baixo. Pode inclinar levemente o rosto se isso ajudar.', target: { x: 50, y: 82 } }
 ];
 
 const state = {
@@ -74,12 +82,12 @@ let lastToggleTime = 0;
 let blinkStartTime = 0;
 let blinkConsumed = false;
 let rafId = 0;
-let filteredGaze = { x: 0.5, y: 0.5 };
+let filteredGaze = { x: 0.5, y: 0.5, pitch: 0.5 };
 let cursorPosition = { x: window.innerWidth * 0.5, y: window.innerHeight * 0.5 };
 let currentTarget = null;
 let dwellStart = 0;
 let calibrationSession = null;
-let currentRawGaze = { x: 0.5, y: 0.5 };
+let currentRawSample = { x: 0.5, y: 0.5, pitch: 0.5 };
 
 function emit() {
   listeners.forEach((listener) => listener(getEyeControlState()));
@@ -138,6 +146,18 @@ function averagePoint(points) {
   };
 }
 
+function averageSample(samples) {
+  if (!samples.length) {
+    return { x: 0.5, y: 0.5, pitch: 0.5 };
+  }
+
+  return {
+    x: average(samples.map((sample) => sample.x)),
+    y: average(samples.map((sample) => sample.y)),
+    pitch: average(samples.map((sample) => sample.pitch))
+  };
+}
+
 function normalizeIris(landmarks, eye) {
   const outer = landmarks[eye.outer];
   const inner = landmarks[eye.inner];
@@ -165,6 +185,14 @@ function computeBlinkRatio(landmarks) {
   const leftRatio = leftVertical / Math.max(leftHorizontal, 0.0001);
   const rightRatio = rightVertical / Math.max(rightHorizontal, 0.0001);
   return (leftRatio + rightRatio) / 2;
+}
+
+function computeHeadPitchMetric(landmarks) {
+  const forehead = landmarks[HEAD_POINTS.forehead];
+  const nose = landmarks[HEAD_POINTS.nose];
+  const chin = landmarks[HEAD_POINTS.chin];
+
+  return clamp((nose.y - forehead.y) / Math.max(chin.y - forehead.y, 0.0001), 0, 1);
 }
 
 function updateCursorVisual() {
@@ -262,7 +290,7 @@ function toggleMode() {
   emit();
 }
 
-function mapGazeToAxes(gaze) {
+function mapGazeToAxes(sample) {
   const calibration = state.calibrationData;
   if (!calibration) {
     return { x: 0, y: 0 };
@@ -274,24 +302,38 @@ function mapGazeToAxes(gaze) {
   const upSpan = Math.max(neutral.y - calibration.up.y, 0.02);
   const downSpan = Math.max(calibration.down.y - neutral.y, 0.02);
 
+  const pitchNeutral = neutral.pitch ?? 0.5;
+  const pitchUpSpan = Math.max(pitchNeutral - (calibration.up.pitch ?? pitchNeutral), 0.015);
+  const pitchDownSpan = Math.max((calibration.down.pitch ?? pitchNeutral) - pitchNeutral, 0.015);
+
   let x = 0;
-  let y = 0;
+  let yEye = 0;
+  let yPitch = 0;
 
-  if (gaze.x < neutral.x) {
-    x = -((neutral.x - gaze.x) / leftSpan);
+  if (sample.x < neutral.x) {
+    x = -((neutral.x - sample.x) / leftSpan);
   } else {
-    x = (gaze.x - neutral.x) / rightSpan;
+    x = (sample.x - neutral.x) / rightSpan;
   }
 
-  if (gaze.y < neutral.y) {
-    y = -((neutral.y - gaze.y) / upSpan);
+  if (sample.y < neutral.y) {
+    yEye = -((neutral.y - sample.y) / upSpan);
   } else {
-    y = (gaze.y - neutral.y) / downSpan;
+    yEye = (sample.y - neutral.y) / downSpan;
   }
+
+  const currentPitch = sample.pitch ?? pitchNeutral;
+  if (currentPitch < pitchNeutral) {
+    yPitch = -((pitchNeutral - currentPitch) / pitchUpSpan);
+  } else {
+    yPitch = (currentPitch - pitchNeutral) / pitchDownSpan;
+  }
+
+  const vertical = clamp((yEye * 0.72) + (yPitch * 0.38), -1.35, 1.35);
 
   return {
     x: clamp(x, -1.25, 1.25),
-    y: clamp(y, -1.25, 1.25)
+    y: vertical
   };
 }
 
@@ -320,7 +362,7 @@ function updateMovement(now) {
 
 function updateBlink(now, landmarks) {
   const ratio = computeBlinkRatio(landmarks);
-  const isClosed = ratio < 0.16;
+  const isClosed = state.blinkClosed ? ratio < BLINK_OPEN_RATIO : ratio < BLINK_CLOSE_RATIO;
 
   state.blinkClosed = isClosed;
   state.blinkText = isClosed ? 'Olhos fechados' : 'Olhos abertos';
@@ -339,6 +381,7 @@ function updateBlink(now, landmarks) {
   if (!blinkConsumed && now - blinkStartTime >= LONG_BLINK_MS && now - lastToggleTime >= TOGGLE_COOLDOWN_MS) {
     blinkConsumed = true;
     lastToggleTime = now;
+    state.blinkText = 'Piscada longa detectada';
     toggleMode();
   }
 }
@@ -348,22 +391,25 @@ function feedCalibrationSample() {
     return;
   }
 
-  calibrationSession.samples.push({ ...currentRawGaze });
+  calibrationSession.samples.push({ ...currentRawSample });
 }
 
 function processLandmarks(landmarks, now) {
   const left = normalizeIris(landmarks, LEFT_EYE);
   const right = normalizeIris(landmarks, RIGHT_EYE);
+  const headPitch = computeHeadPitchMetric(landmarks);
   const raw = {
     x: (left.x + right.x) / 2,
-    y: (left.y + right.y) / 2
+    y: (left.y + right.y) / 2,
+    pitch: headPitch
   };
 
-  currentRawGaze = raw;
+  currentRawSample = raw;
 
   const blend = clamp(0.28 - state.smoothing * 0.02, 0.05, 0.2);
   filteredGaze.x += (raw.x - filteredGaze.x) * blend;
   filteredGaze.y += (raw.y - filteredGaze.y) * blend;
+  filteredGaze.pitch += (raw.pitch - filteredGaze.pitch) * Math.max(blend * 0.85, 0.04);
 
   state.faceDetected = true;
   state.trackingText = 'Rosto detectado';
@@ -470,7 +516,7 @@ async function runCalibrationStep(stepIndex) {
     throw new Error('A câmera não conseguiu coletar dados suficientes.');
   }
 
-  calibrationSession.points[step.key] = averagePoint(calibrationSession.samples);
+  calibrationSession.points[step.key] = averageSample(calibrationSession.samples);
 }
 
 async function finalizeCalibration() {
@@ -581,7 +627,7 @@ export async function startCalibration() {
     }
 
     await finalizeCalibration();
-    updateOverlay({ x: 50, y: 50 }, 'Calibração concluída', 'Agora o sistema já sabe o que é esquerda, direita, cima e baixo para a sua câmera.', 100, 'Concluído');
+    updateOverlay({ x: 50, y: 50 }, 'Calibração concluída', 'Agora o sistema usa olhos e uma leve inclinação do rosto para reforçar cima e baixo neste monitor.', 100, 'Concluído');
     await wait(900);
   } finally {
     overlayEl.classList.add('hidden');
