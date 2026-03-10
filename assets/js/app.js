@@ -11,9 +11,9 @@ import {
   getEyeControlState
 } from './eyeControl.js';
 
-const STORAGE_KEY = 'paa_students_v7';
-const SESSION_KEY = 'paa_session_v7';
-const TEST_PANEL_KEY = 'paa_test_panel_v7';
+const STORAGE_KEY = 'paa_students_v6';
+const SESSION_KEY = 'paa_session_v6';
+const TEST_PANEL_KEY = 'paa_test_panel_v6';
 const DEFAULT_LOGIN = {
   email: 'admin@portal.local',
   password: '123456',
@@ -77,7 +77,7 @@ const pageMeta = {
   dashboard: {
     eyebrow: 'Portal acadêmico',
     title: 'Dashboard',
-    description: 'Resumo rápido do sistema e do estado atual do rastreamento.'
+    description: 'Resumo rápido do sistema e do estado de acessibilidade.'
   },
   students: {
     eyebrow: 'Gestão acadêmica',
@@ -92,7 +92,7 @@ const pageMeta = {
   accessibility: {
     eyebrow: 'Ajuste inicial',
     title: 'Rastreamento ocular',
-    description: 'A câmera abre no início. O cursor usa WebGazer como motor principal, e o MediaPipe fica responsável por presença de rosto e piscada longa.'
+    description: 'A câmera abre no início. Direita/esquerda seguem os olhos. Cima/baixo combinam olhos com inclinação vertical do rosto.'
   }
 };
 
@@ -195,7 +195,7 @@ function bindEvents() {
   retryCameraButton?.addEventListener('click', async () => {
     try {
       await requestCamera();
-      showToast('Webcam ativada', 'A câmera foi ligada novamente. O WebGazer já voltou a prever o olhar nesta sessão.');
+      showToast('Webcam ativada', 'A câmera foi ligada novamente. O ajuste inicial começa sozinho quando o rosto estiver estável.');
     } catch (error) {
       showToast('Erro ao ativar a webcam', getReadableError(error), true);
     }
@@ -209,7 +209,7 @@ function bindEvents() {
   startCalibrationButton?.addEventListener('click', async () => {
     try {
       await startCalibration();
-      showToast('Reiniciando rastreamento', 'Os dados de treino da sessão foram limpos. Faça alguns cliques olhando para os botões para o WebGazer se ajustar melhor.');
+      showToast('Refazendo ajuste', 'Olhe para o centro por um instante para atualizar a referência do seu monitor.');
     } catch (error) {
       showToast('Não foi possível refazer o ajuste', getReadableError(error), true);
     }
@@ -267,7 +267,7 @@ function bindEvents() {
 
 function handleEyeStateChange(eyeState) {
   cameraStatusPill.textContent = eyeState.cameraActive ? 'Câmera ligada' : 'Câmera desligada';
-  calibrationStatusPill.textContent = eyeState.calibrated ? 'Rastreamento pronto' : eyeState.calibrationText;
+  calibrationStatusPill.textContent = eyeState.calibrated ? 'Ajuste concluído' : eyeState.calibrationText;
   modeStatusPill.textContent = eyeState.controlActive ? 'Modo mover' : 'Modo pausado';
   modeStatusPill.classList.toggle('success', !eyeState.controlActive);
 
@@ -423,8 +423,8 @@ function renderDashboard() {
 function renderDashboardAccessibility(eyeState) {
   dashboardAccessibilityList.innerHTML = [
     summaryTemplate('Câmera', eyeState.cameraActive ? 'Ligada e pronta para rastrear.' : 'Permissão ainda não concedida.'),
-    summaryTemplate('Rastreamento', eyeState.calibrated ? 'Pronto para esta sessão; mais cliques melhoram a precisão.' : eyeState.calibrationText),
-    summaryTemplate('Modo atual', eyeState.controlActive ? 'Movendo o cursor pelas previsões do WebGazer.' : 'Cursor pausado para leitura.')
+    summaryTemplate('Ajuste inicial', eyeState.calibrated ? 'Concluído para esta pessoa e este monitor.' : eyeState.calibrationText),
+    summaryTemplate('Modo atual', eyeState.controlActive ? 'Movendo o cursor pelo olhar.' : 'Cursor pausado para leitura.')
   ].join('');
 }
 

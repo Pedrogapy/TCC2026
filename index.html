@@ -5,13 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Portal Acadêmico Acessível</title>
   <meta name="description" content="Protótipo web de gestão acadêmica com controle ocular por webcam no navegador." />
-  <link rel="icon" href="data:," />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="assets/css/styles.css" />
-  <script>window.saveDataAcrossSessions = false;</script>
-  <script src="https://webgazer.cs.brown.edu/webgazer.js"></script>
 </head>
 <body>
   <div class="page-glow"></div>
@@ -73,8 +70,8 @@
       <div class="sidebar-footer">
         <div class="compact-note">
           <span>Versão atual</span>
-          <strong>v0.7.0</strong>
-          <small>WebGazer no cursor + MediaPipe na piscada</small>
+          <strong>v0.5.0</strong>
+          <small>eixo X corrigido e teste controlável</small>
         </div>
         <button class="btn btn-secondary btn-block" id="logout-button" type="button">Sair</button>
       </div>
@@ -85,7 +82,7 @@
         <div>
           <p class="topbar-eyebrow" id="page-eyebrow">Portal acadêmico</p>
           <h1 id="page-title">Dashboard</h1>
-          <p class="topbar-description" id="page-description">Resumo rápido do sistema e do estado atual do rastreamento.</p>
+          <p class="topbar-description" id="page-description">Resumo rápido do sistema e do estado de acessibilidade.</p>
         </div>
 
         <div class="topbar-side">
@@ -123,7 +120,7 @@
               <div class="card-head simple">
                 <div>
                   <h2>Estado de acessibilidade</h2>
-                  <p>O cursor agora usa WebGazer como motor principal. O MediaPipe fica só como apoio para presença de rosto e piscada longa.</p>
+                  <p>Direita/esquerda usam os olhos. Cima/baixo usam olhos com leve inclinação do rosto.</p>
                 </div>
               </div>
               <div class="summary-list compact" id="dashboard-accessibility-list"></div>
@@ -247,8 +244,8 @@
             <article class="card camera-card">
               <div class="card-head simple">
                 <div>
-                  <h2>Rastreamento do cursor</h2>
-                  <p>A webcam é aberta ao iniciar o site. O cursor usa WebGazer para prever o olhar na tela, enquanto o MediaPipe fica responsável por presença de rosto e piscada longa.</p>
+                  <h2>Ajuste inicial da câmera</h2>
+                  <p>A câmera é solicitada na abertura do site. O ajuste inicial começa sozinho quando você centraliza o rosto e olha para o meio do monitor.</p>
                 </div>
               </div>
 
@@ -281,7 +278,7 @@
                   <div class="control-buttons compact-controls">
                     <button class="btn btn-secondary hidden" id="start-camera-button" type="button">Tentar câmera novamente</button>
                     <button class="btn btn-secondary hidden" id="stop-camera-button" type="button">Desligar câmera</button>
-                    <button class="btn btn-primary" id="start-calibration-button" type="button">Reiniciar rastreamento desta sessão</button>
+                    <button class="btn btn-primary" id="start-calibration-button" type="button">Refazer ajuste desta sessão</button>
                     <button class="btn btn-ghost" id="toggle-mode-button" type="button">Mover cursor</button>
                     <button class="btn btn-ghost" id="toggle-cursor-button" type="button">Ocultar cursor</button>
                   </div>
@@ -312,16 +309,16 @@
 
               <div class="quick-guide compact-guide">
                 <div class="quick-guide-item">
-                  <strong>Cursor por olhar</strong>
-                  <span>WebGazer prevê a posição do olhar na tela inteira.</span>
+                  <strong>Direita / esquerda</strong>
+                  <span>Usam principalmente o movimento dos olhos.</span>
+                </div>
+                <div class="quick-guide-item">
+                  <strong>Cima / baixo</strong>
+                  <span>Combinam olhos com inclinação vertical do rosto.</span>
                 </div>
                 <div class="quick-guide-item">
                   <strong>Piscada longa</strong>
-                  <span>MediaPipe detecta piscada longa para alternar mover e pausar.</span>
-                </div>
-                <div class="quick-guide-item">
-                  <strong>Treino natural</strong>
-                  <span>Clicar em botões e navegar ajuda o WebGazer a se ajustar durante a sessão.</span>
+                  <span>Alterna entre mover e pausar o cursor.</span>
                 </div>
               </div>
             </article>
@@ -331,8 +328,8 @@
             <details class="test-disclosure" id="test-disclosure">
               <summary>
                 <div>
-                  <h2>Área de treino</h2>
-                  <p>Abra quando quiser dar mais cliques de treino para o WebGazer antes de navegar pelo sistema.</p>
+                  <h2>Área de teste</h2>
+                  <p>Abra somente quando quiser validar o cursor antes de navegar pelo sistema.</p>
                 </div>
                 <span class="badge soft">Opcional</span>
               </summary>
@@ -356,7 +353,7 @@
   <div class="calibration-overlay hidden" id="calibration-overlay">
     <div class="calibration-top">
       <span class="badge soft" id="calibration-step-badge">Preparando</span>
-      <h2 id="calibration-title">Rastreamento do cursor</h2>
+      <h2 id="calibration-title">Ajuste inicial da câmera</h2>
       <p id="calibration-description">Mantenha o rosto estável e olhe para o centro do monitor por um instante.</p>
     </div>
     <div class="calibration-target" id="calibration-target"></div>
