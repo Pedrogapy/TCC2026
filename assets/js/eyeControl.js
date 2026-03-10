@@ -1,17 +1,17 @@
-const STORAGE_KEY = 'paa_eye_config_v9';
+const STORAGE_KEY = 'paa_eye_config_v10';
 const LONG_BLINK_MS = 1500;
 const TOGGLE_COOLDOWN_MS = 2300;
 const DWELL_MS = 7000;
 const DEADZONE_X = 0.09;
-const DEADZONE_Y = 0.045;
+const DEADZONE_Y = 0.032;
 const BLINK_CLOSE_RATIO = 0.105;
 const BLINK_OPEN_RATIO = 0.155;
 const AUTO_CENTER_CALIBRATION_MS = 1900;
 const AUTO_FACE_STABLE_MS = 650;
 const OVERLAY_FAILSAFE_MS = 8500;
 const DEFAULT_HORIZONTAL_SPAN = 0.115;
-const DEFAULT_EYE_POSITIVE_SPAN = 0.18;
-const DEFAULT_EYE_NEGATIVE_SPAN = 0.18;
+const DEFAULT_EYE_POSITIVE_SPAN = 0.12;
+const DEFAULT_EYE_NEGATIVE_SPAN = 0.18; // baixo mantém faixa mais conservadora
 const DEFAULT_OPEN_POSITIVE_SPAN = 0.04;
 const DEFAULT_OPEN_NEGATIVE_SPAN = 0.04;
 const DEFAULT_PITCH_POSITIVE_SPAN = 0.18;
@@ -336,20 +336,29 @@ function mapSampleToAxes(sample) {
   const openNorm = normalizeSigned(sample.openness - neutral.openness, openNegativeSpan, openPositiveSpan);
   const pitchNorm = normalizeSigned(sample.pitch - neutral.pitch, pitchNegativeSpan, pitchPositiveSpan);
 
-  let vertical = -eyeNorm * 1.05;
+  const lookingUp = eyeNorm > 0;
+  const lookingDown = eyeNorm < 0;
 
-  if (Math.abs(eyeNorm) > 0.04) {
-    if (Math.sign(openNorm) === Math.sign(eyeNorm) || Math.abs(openNorm) < 0.06) {
-      vertical += -openNorm * 0.22;
+  let vertical = -eyeNorm * (lookingUp ? 1.42 : 1.08);
+
+  if (Math.abs(eyeNorm) > 0.035) {
+    if (Math.sign(openNorm) === Math.sign(eyeNorm) || Math.abs(openNorm) < 0.05) {
+      vertical += -openNorm * (lookingUp ? 0.16 : 0.20);
     }
     if (Math.sign(pitchNorm) === Math.sign(eyeNorm) || Math.abs(pitchNorm) < 0.05) {
-      vertical += -pitchNorm * 0.14;
+      vertical += -pitchNorm * (lookingUp ? 0.08 : 0.12);
     }
   } else {
-    vertical += -openNorm * 0.10;
+    vertical += -openNorm * 0.08;
   }
 
-  return { x: horizontal, y: clamp(vertical, -1.55, 1.55) };
+  if (lookingUp) {
+    vertical *= 1.18;
+  } else if (lookingDown) {
+    vertical *= 0.98;
+  }
+
+  return { x: horizontal, y: clamp(vertical, -1.85, 1.55) };
 }
 
 function updateMovement(now) {
@@ -362,7 +371,8 @@ function updateMovement(now) {
     const effectiveY = Math.abs(mapped.y) < DEADZONE_Y ? 0 : mapped.y;
     const boost = 2.4 + state.sensitivity * 0.55;
     const speedX = Math.abs(effectiveX) * boost * 1.08;
-    const speedY = Math.abs(effectiveY) * boost * 1.02;
+    let speedY = Math.abs(effectiveY) * boost * 1.02;
+    if (effectiveY < 0) speedY *= 1.28;
 
     cursorPosition.x = clamp(cursorPosition.x + effectiveX * speedX * dt, 18, window.innerWidth - 18);
     cursorPosition.y = clamp(cursorPosition.y + effectiveY * speedY * dt, 18, window.innerHeight - 18);
@@ -463,7 +473,7 @@ function finishNeutralCapture() {
   state.calibrationData = {
     neutral,
     horizontalSpan: clamp(xSpread * 5.4, 0.075, 0.16),
-    eyePositiveSpan: clamp(eyeSpread * 3.5, 0.09, 0.34),
+    eyePositiveSpan: clamp(eyeSpread * 2.45, 0.055, 0.22),
     eyeNegativeSpan: clamp(eyeSpread * 3.5, 0.09, 0.34),
     openPositiveSpan: clamp(openSpread * 3.3, 0.02, 0.08),
     openNegativeSpan: clamp(openSpread * 3.3, 0.02, 0.08),
@@ -486,7 +496,7 @@ function finishNeutralCapture() {
   saveStoredConfig();
   updateOverlay({
     title: 'Ajuste concluído',
-    description: 'O cursor já pode ser usado. Se o vertical parecer fraco, olhe para cima e para baixo algumas vezes para o sistema ampliar o alcance nesta sessão.',
+    description: 'O cursor já pode ser usado. O movimento para cima foi reforçado nesta versão; se ainda parecer fraco, olhe para cima algumas vezes durante o uso para ampliar o alcance da sessão.',
     progress: 100,
     badge: 'Pronto',
     showTarget: false
