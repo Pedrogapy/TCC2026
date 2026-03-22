@@ -134,6 +134,10 @@ const toggleCursorButton = document.getElementById('toggle-cursor-button');
 const eyeSettingsForm = document.getElementById('eye-settings-form');
 const sensitivityLabel = document.getElementById('sensitivity-label');
 const smoothingLabel = document.getElementById('smoothing-label');
+const sensitivityXLabel = document.getElementById('sensitivity-x-label');
+const sensitivityYLabel = document.getElementById('sensitivity-y-label');
+const smoothingXLabel = document.getElementById('smoothing-x-label');
+const smoothingYLabel = document.getElementById('smoothing-y-label');
 const cameraStatusPill = document.getElementById('camera-status-pill');
 const calibrationStatusPill = document.getElementById('calibration-status-pill');
 const modeStatusPill = document.getElementById('mode-status-pill');
@@ -157,9 +161,17 @@ async function boot() {
   if (eyeSettingsForm) {
     eyeSettingsForm.elements.sensitivity.value = String(eyeState.sensitivity);
     eyeSettingsForm.elements.smoothing.value = String(eyeState.smoothing);
+    eyeSettingsForm.elements.sensitivityX.value = String(eyeState.sensitivityX);
+    eyeSettingsForm.elements.sensitivityY.value = String(eyeState.sensitivityY);
+    eyeSettingsForm.elements.smoothingX.value = String(eyeState.smoothingX);
+    eyeSettingsForm.elements.smoothingY.value = String(eyeState.smoothingY);
   }
   sensitivityLabel.textContent = String(eyeState.sensitivity);
   smoothingLabel.textContent = String(eyeState.smoothing);
+  sensitivityXLabel.textContent = String(eyeState.sensitivityX);
+  sensitivityYLabel.textContent = String(eyeState.sensitivityY);
+  smoothingXLabel.textContent = String(eyeState.smoothingX);
+  smoothingYLabel.textContent = String(eyeState.smoothingY);
   render();
 
   autoRequestCameraOnStart().catch((error) => {
@@ -195,7 +207,7 @@ function bindEvents() {
   retryCameraButton?.addEventListener('click', async () => {
     try {
       await requestCamera();
-      showToast('Webcam ativada', 'A câmera foi ligada novamente. O ajuste inicial começa sozinho quando o rosto estiver estável.');
+      showToast('Webcam ativada', 'A câmera foi ligada novamente. Primeiro o sistema mostra um aviso e depois abre a tela de calibração.');
     } catch (error) {
       showToast('Erro ao ativar a webcam', getReadableError(error), true);
     }
@@ -209,7 +221,7 @@ function bindEvents() {
   startCalibrationButton?.addEventListener('click', async () => {
     try {
       await startCalibration();
-      showToast('Refazendo ajuste', 'Olhe para o centro por um instante para atualizar a referência do seu monitor.');
+      showToast('Aviso de calibração', 'Confirme o aviso para a tela de calibração aparecer e refazer o ajuste desta sessão.');
     } catch (error) {
       showToast('Não foi possível refazer o ajuste', getReadableError(error), true);
     }
@@ -227,9 +239,17 @@ function bindEvents() {
     const data = new FormData(eyeSettingsForm);
     const sensitivity = Number(data.get('sensitivity'));
     const smoothing = Number(data.get('smoothing'));
+    const sensitivityX = Number(data.get('sensitivityX'));
+    const sensitivityY = Number(data.get('sensitivityY'));
+    const smoothingX = Number(data.get('smoothingX'));
+    const smoothingY = Number(data.get('smoothingY'));
     sensitivityLabel.textContent = String(sensitivity);
     smoothingLabel.textContent = String(smoothing);
-    updateEyeConfig({ sensitivity, smoothing });
+    sensitivityXLabel.textContent = String(sensitivityX);
+    sensitivityYLabel.textContent = String(sensitivityY);
+    smoothingXLabel.textContent = String(smoothingX);
+    smoothingYLabel.textContent = String(smoothingY);
+    updateEyeConfig({ sensitivity, smoothing, sensitivityX, sensitivityY, smoothingX, smoothingY });
   });
 
   testDisclosure?.addEventListener('toggle', () => {
@@ -274,7 +294,7 @@ function handleEyeStateChange(eyeState) {
   cameraStateLabel.textContent = eyeState.cameraActive ? 'Ligada' : 'Desligada';
   trackingStateLabel.textContent = eyeState.trackingText;
   blinkStateLabel.textContent = eyeState.blinkText;
-  dwellStateLabel.textContent = `${(eyeState.dwellMs / 1000).toFixed(1)}s / 7.0s`;
+  dwellStateLabel.textContent = `${(eyeState.dwellMs / 1000).toFixed(1)}s / ${((eyeState.dwellTargetMs || 3000) / 1000).toFixed(1)}s`; 
   cameraPlaceholder.classList.toggle('hidden', eyeState.cameraActive);
 
   if (retryCameraButton) retryCameraButton.classList.toggle('hidden', eyeState.cameraActive);
@@ -424,7 +444,7 @@ function renderDashboardAccessibility(eyeState) {
   dashboardAccessibilityList.innerHTML = [
     summaryTemplate('Câmera', eyeState.cameraActive ? 'Ligada e pronta para rastrear.' : 'Permissão ainda não concedida.'),
     summaryTemplate('Ajuste inicial', eyeState.calibrated ? 'Concluído para esta pessoa e este monitor.' : eyeState.calibrationText),
-    summaryTemplate('Modo atual', eyeState.controlActive ? 'Movendo o cursor pelo olhar.' : 'Cursor pausado para leitura.')
+    summaryTemplate('Modo atual', eyeState.controlActive ? 'Movendo o cursor pelo olhar com dwell de 3 segundos ativo.' : 'Cursor pausado para leitura, ainda com dwell disponível sobre alvos.')
   ].join('');
 }
 

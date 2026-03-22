@@ -984,3 +984,76 @@ button,
     grid-template-columns: 1fr;
   }
 }
+
+
+.setting-help-box {
+  padding: 1rem 1.05rem;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.045);
+  display: grid;
+  gap: 0.45rem;
+  color: var(--muted);
+}
+
+.setting-help-box strong {
+  color: var(--text);
+}
+
+.setting-help-box p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.settings-group-box {
+  padding: 1rem;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.035);
+  display: grid;
+  gap: 0.9rem;
+}
+
+.settings-group-box h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.calibration-notice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 58;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: rgba(2, 5, 10, 0.68);
+  backdrop-filter: blur(10px);
+}
+
+.calibration-notice-card {
+  width: min(560px, 100%);
+  padding: 1.6rem;
+  border-radius: 28px;
+  border: 1px solid var(--line);
+  background: rgba(9, 17, 30, 0.96);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 0.95rem;
+}
+
+.calibration-notice-card h2,
+.calibration-notice-card p {
+  margin: 0;
+}
+
+.calibration-notice-card p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.calibration-notice-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}

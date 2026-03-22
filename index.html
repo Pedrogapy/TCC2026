@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:," />
   <link rel="stylesheet" href="assets/css/styles.css" />
 </head>
 <body>
@@ -70,8 +71,8 @@
       <div class="sidebar-footer">
         <div class="compact-note">
           <span>Versão atual</span>
-          <strong>v0.5.0</strong>
-          <small>eixo X corrigido e teste controlável</small>
+          <strong>v0.6.0</strong>
+          <small>ajustes por eixo, sons e clique por dwell</small>
         </div>
         <button class="btn btn-secondary btn-block" id="logout-button" type="button">Sair</button>
       </div>
@@ -245,7 +246,7 @@
               <div class="card-head simple">
                 <div>
                   <h2>Ajuste inicial da câmera</h2>
-                  <p>A câmera é solicitada na abertura do site. O ajuste inicial começa sozinho quando você centraliza o rosto e olha para o meio do monitor.</p>
+                  <p>A câmera é solicitada na abertura do site. Antes da calibração aparecer, o sistema mostra um aviso de confirmação. Depois disso, o ajuste inicial começa com o rosto centralizado.</p>
                 </div>
               </div>
 
@@ -271,7 +272,7 @@
                     </div>
                     <div class="mini-stat">
                       <span>Dwell</span>
-                      <strong id="dwell-state-label">0.0s / 7.0s</strong>
+                      <strong id="dwell-state-label">0.0s / 3.0s</strong>
                     </div>
                   </div>
 
@@ -290,21 +291,54 @@
               <div class="card-head simple">
                 <div>
                   <h2>Ajustes essenciais</h2>
-                  <p>Só o que realmente interfere no uso do cursor.</p>
+                  <p>Configuração breve e objetiva para deixar o cursor mais coerente no seu monitor.</p>
                 </div>
               </div>
 
+              <div class="setting-help-box">
+                <strong>O que cada controle faz?</strong>
+                <p><strong>Sensibilidade</strong> define o quanto o cursor anda com pequenos movimentos do olhar. <strong>Suavização</strong> filtra tremidas e deixa o movimento mais estável, mas também um pouco mais lento.</p>
+                <p>Os controles gerais afetam os dois eixos. Os controles de <strong>X</strong> e <strong>Y</strong> refinam cada direção separadamente.</p>
+              </div>
+
               <form id="eye-settings-form" class="settings-form compact-settings-form">
-                <label>
-                  <span>Sensibilidade</span>
-                  <input type="range" name="sensitivity" min="1" max="10" value="4" />
-                  <small id="sensitivity-label">4</small>
-                </label>
-                <label>
-                  <span>Suavização</span>
-                  <input type="range" name="smoothing" min="1" max="10" value="7" />
-                  <small id="smoothing-label">7</small>
-                </label>
+                <div class="settings-group-box">
+                  <h3>Ajuste geral</h3>
+                  <label>
+                    <span>Sensibilidade geral</span>
+                    <input type="range" name="sensitivity" min="1" max="10" value="4" />
+                    <small id="sensitivity-label">4</small>
+                  </label>
+                  <label>
+                    <span>Suavização geral</span>
+                    <input type="range" name="smoothing" min="1" max="10" value="7" />
+                    <small id="smoothing-label">7</small>
+                  </label>
+                </div>
+
+                <div class="settings-group-box">
+                  <h3>Ajuste por eixo</h3>
+                  <label>
+                    <span>Sensibilidade do eixo X</span>
+                    <input type="range" name="sensitivityX" min="1" max="10" value="5" />
+                    <small id="sensitivity-x-label">5</small>
+                  </label>
+                  <label>
+                    <span>Sensibilidade do eixo Y</span>
+                    <input type="range" name="sensitivityY" min="1" max="10" value="5" />
+                    <small id="sensitivity-y-label">5</small>
+                  </label>
+                  <label>
+                    <span>Suavização do eixo X</span>
+                    <input type="range" name="smoothingX" min="1" max="10" value="5" />
+                    <small id="smoothing-x-label">5</small>
+                  </label>
+                  <label>
+                    <span>Suavização do eixo Y</span>
+                    <input type="range" name="smoothingY" min="1" max="10" value="5" />
+                    <small id="smoothing-y-label">5</small>
+                  </label>
+                </div>
               </form>
 
               <div class="quick-guide compact-guide">
@@ -350,7 +384,22 @@
     </div>
   </div>
 
-  <div class="calibration-overlay hidden" id="calibration-overlay">
+    <div class="calibration-notice-overlay hidden" id="calibration-notice-overlay">
+    <div class="calibration-notice-card">
+      <span class="badge">Aviso de calibração</span>
+      <h2>Uma tela de calibração vai aparecer</h2>
+      <p>
+        Antes do rastreamento começar, o sistema vai abrir uma tela de calibração para ajustar a referência do seu olhar
+        para este monitor. Quando estiver pronto, confirme para continuar.
+      </p>
+      <div class="calibration-notice-actions">
+        <button class="btn btn-secondary" id="calibration-notice-cancel" type="button">Agora não</button>
+        <button class="btn btn-primary" id="calibration-notice-confirm" type="button">OK, continuar</button>
+      </div>
+    </div>
+  </div>
+
+<div class="calibration-overlay hidden" id="calibration-overlay">
     <div class="calibration-top">
       <span class="badge soft" id="calibration-step-badge">Preparando</span>
       <h2 id="calibration-title">Ajuste inicial da câmera</h2>

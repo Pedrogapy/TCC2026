@@ -1,7 +1,7 @@
-const STORAGE_KEY = 'paa_eye_config_v10';
+const STORAGE_KEY = 'paa_eye_config_v11';
 const LONG_BLINK_MS = 1500;
 const TOGGLE_COOLDOWN_MS = 2300;
-const DWELL_MS = 7000;
+const DWELL_MS = 3000;
 const DEADZONE_X = 0.09;
 const DEADZONE_Y = 0.032;
 const BLINK_CLOSE_RATIO = 0.105;
@@ -59,12 +59,17 @@ const state = {
   calibrated: false,
   calibrationText: 'Ajuste inicial pendente',
   calibrationProgress: 0,
-  sensitivity: 2,
-  smoothing: 8,
+  sensitivity: 4,
+  smoothing: 7,
+  sensitivityX: 5,
+  sensitivityY: 5,
+  smoothingX: 5,
+  smoothingY: 5,
   dwellMs: 0,
   targetLabel: 'Nenhum alvo',
   calibrationData: null,
-  needsCalibration: true
+  needsCalibration: true,
+  dwellTargetMs: DWELL_MS
 };
 
 let listeners = [];
@@ -78,6 +83,13 @@ let descEl;
 let badgeEl;
 let placeholderEl;
 let overlayCloseButton;
+let noticeOverlayEl;
+let noticeConfirmButton;
+let noticeCancelButton;
+let noticeResolver = null;
+let calibrationGateOpen = false;
+let audioContext = null;
+let audioUnlocked = false;
 let faceLandmarker = null;
 let stream = null;
 let lastVideoTime = -1;
@@ -128,6 +140,10 @@ function loadStoredConfig() {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
     if (typeof stored.sensitivity === 'number') state.sensitivity = clamp(stored.sensitivity, 1, 10);
     if (typeof stored.smoothing === 'number') state.smoothing = clamp(stored.smoothing, 1, 10);
+    if (typeof stored.sensitivityX === 'number') state.sensitivityX = clamp(stored.sensitivityX, 1, 10);
+    if (typeof stored.sensitivityY === 'number') state.sensitivityY = clamp(stored.sensitivityY, 1, 10);
+    if (typeof stored.smoothingX === 'number') state.smoothingX = clamp(stored.smoothingX, 1, 10);
+    if (typeof stored.smoothingY === 'number') state.smoothingY = clamp(stored.smoothingY, 1, 10);
   } catch {
     // ignore
   }
@@ -136,7 +152,11 @@ function loadStoredConfig() {
 function saveStoredConfig() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     sensitivity: state.sensitivity,
-    smoothing: state.smoothing
+    smoothing: state.smoothing,
+    sensitivityX: state.sensitivityX,
+    sensitivityY: state.sensitivityY,
+    smoothingX: state.smoothingX,
+    smoothingY: state.smoothingY
   }));
 }
 
@@ -147,6 +167,7 @@ function clearStoredCalibration() {
   state.controlActive = false;
   state.calibrationText = 'Ajuste inicial da sessão pendente';
   state.calibrationProgress = 0;
+  calibrationGateOpen = false;
   saveStoredConfig();
 }
 
@@ -188,6 +209,79 @@ function computeHeadPitchMetric(landmarks) {
   const foreheadToNose = Math.abs(nose.y - forehead.y);
   const noseToChin = Math.abs(chin.y - nose.y);
   return clamp(noseToChin / Math.max(foreheadToNose, 0.0001), 0.45, 2.6);
+}
+
+function ensureAudioContext() {
+  if (!audioContext) {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return audioContext;
+}
+
+async function unlockAudio() {
+  try {
+    const context = ensureAudioContext();
+    if (context.state === 'suspended') await context.resume();
+    audioUnlocked = context.state === 'running';
+  } catch {
+    audioUnlocked = false;
+  }
+}
+
+function playTone(frequency, startOffset, duration, volume = 0.035, type = 'sine') {
+  if (!audioUnlocked) return;
+  const context = ensureAudioContext();
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(frequency, context.currentTime + startOffset);
+  gain.gain.setValueAtTime(0.0001, context.currentTime + startOffset);
+  gain.gain.exponentialRampToValueAtTime(volume, context.currentTime + startOffset + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + startOffset + duration);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start(context.currentTime + startOffset);
+  oscillator.stop(context.currentTime + startOffset + duration + 0.02);
+}
+
+function playModeSound(isActive) {
+  if (isActive) {
+    playTone(620, 0, 0.12, 0.03, 'triangle');
+    playTone(820, 0.13, 0.12, 0.026, 'triangle');
+  } else {
+    playTone(780, 0, 0.12, 0.03, 'triangle');
+    playTone(540, 0.13, 0.12, 0.026, 'triangle');
+  }
+}
+
+function playClickSound() {
+  playTone(920, 0, 0.05, 0.03, 'square');
+  playTone(620, 0.04, 0.06, 0.018, 'triangle');
+}
+
+function showCalibrationNotice() {
+  return new Promise((resolve) => {
+    if (!noticeOverlayEl) {
+      resolve(true);
+      return;
+    }
+    noticeResolver = resolve;
+    noticeOverlayEl.classList.remove('hidden');
+  });
+}
+
+function resolveCalibrationNotice(accepted) {
+  if (noticeOverlayEl) noticeOverlayEl.classList.add('hidden');
+  calibrationGateOpen = accepted;
+  if (accepted) {
+    state.calibrationText = 'Aviso confirmado';
+  } else if (!state.calibrated) {
+    state.calibrationText = 'Aviso de calibração pendente';
+  }
+  const resolver = noticeResolver;
+  noticeResolver = null;
+  if (resolver) resolver(accepted);
+  emit();
 }
 
 function updateCursorVisual() {
@@ -264,17 +358,27 @@ function clearDwell() {
 
 function isClickable(element) {
   if (!element || !(element instanceof HTMLElement)) return false;
-  return Boolean(element.closest('button, a, input, select, textarea, [data-eye-click], [role="button"], .nav-button, .btn, .test-target'));
+  if (element.closest('.calibration-overlay, .calibration-notice-overlay')) return false;
+  if (element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true') return false;
+  return Boolean(element.closest('button, a, input, select, textarea, [data-eye-click], [role="button"], .nav-button, .btn, .test-target, summary'));
+}
+
+function getClickableTargetFromPoint(x, y) {
+  const elements = document.elementsFromPoint(x, y);
+  for (const element of elements) {
+    const clickable = element?.closest('button, a, input, select, textarea, [data-eye-click], [role="button"], .nav-button, .btn, .test-target, summary');
+    if (isClickable(clickable)) return clickable;
+  }
+  return null;
 }
 
 function handleDwell(now) {
-  if (state.controlActive || !state.cursorVisible) {
+  if (!state.cameraActive || !state.calibrated || !state.cursorVisible) {
     clearDwell();
     return;
   }
 
-  const element = document.elementFromPoint(cursorPosition.x, cursorPosition.y);
-  const clickable = element?.closest('button, a, input, select, textarea, [data-eye-click], [role="button"], .nav-button, .btn, .test-target');
+  const clickable = getClickableTargetFromPoint(cursorPosition.x, cursorPosition.y);
 
   if (!isClickable(clickable)) {
     clearDwell();
@@ -292,9 +396,10 @@ function handleDwell(now) {
   state.targetLabel = (currentTarget.textContent || currentTarget.getAttribute('aria-label') || 'Alvo').trim();
 
   if (state.dwellMs >= DWELL_MS) {
-    currentTarget.classList.remove('is-dwell');
-    currentTarget.click();
+    const targetToClick = currentTarget;
     clearDwell();
+    targetToClick.click();
+    playClickSound();
   }
 }
 
@@ -369,22 +474,34 @@ function updateMovement(now) {
     const mapped = mapSampleToAxes(filteredSample);
     const effectiveX = Math.abs(mapped.x) < DEADZONE_X ? 0 : mapped.x;
     const effectiveY = Math.abs(mapped.y) < DEADZONE_Y ? 0 : mapped.y;
-    const boost = 2.4 + state.sensitivity * 0.55;
-    const speedX = Math.abs(effectiveX) * boost * 1.08;
-    let speedY = Math.abs(effectiveY) * boost * 1.02;
-    if (effectiveY < 0) speedY *= 1.28;
+    const baseBoost = 1.9 + state.sensitivity * 0.42;
+    const axisScaleX = 0.55 + state.sensitivityX * 0.11;
+    const axisScaleY = 0.55 + state.sensitivityY * 0.11;
+    const speedX = Math.abs(effectiveX) * baseBoost * axisScaleX;
+    let speedY = Math.abs(effectiveY) * baseBoost * 0.92 * axisScaleY;
+    if (effectiveY < 0) speedY *= 1.22;
 
     cursorPosition.x = clamp(cursorPosition.x + effectiveX * speedX * dt, 18, window.innerWidth - 18);
     cursorPosition.y = clamp(cursorPosition.y + effectiveY * speedY * dt, 18, window.innerHeight - 18);
-    clearDwell();
-  } else {
-    handleDwell(now);
   }
 
+  handleDwell(now);
   updateCursorVisual();
 }
 
 function toggleMode() {
+  if (!state.calibrated) {
+    state.controlActive = false;
+    return false;
+  }
+  const previous = state.controlActive;
+  state.controlActive = !state.controlActive;
+  clearDwell();
+  if (previous !== state.controlActive) playModeSound(state.controlActive);
+  return previous !== state.controlActive;
+}
+
+function updateBlink() {
   if (!state.calibrated) {
     state.controlActive = false;
     return;
@@ -510,7 +627,7 @@ function finishNeutralCapture() {
 }
 
 function maybeAutoCalibrate(now) {
-  if (!state.cameraActive || !state.faceDetected || state.calibrated) return;
+  if (!state.cameraActive || !state.faceDetected || state.calibrated || !calibrationGateOpen) return;
   if (!neutralCapture) resetNeutralCapture();
 
   if (!neutralCapture.collecting) {
@@ -561,11 +678,15 @@ function processLandmarks(landmarks, now) {
 
   currentRawSample = raw;
 
-  const blend = clamp(0.28 - state.smoothing * 0.02, 0.05, 0.2);
-  filteredSample.x += (raw.x - filteredSample.x) * blend;
-  filteredSample.eyeVertical += (raw.eyeVertical - filteredSample.eyeVertical) * Math.max(blend * 0.95, 0.04);
-  filteredSample.openness += (raw.openness - filteredSample.openness) * Math.max(blend * 0.9, 0.035);
-  filteredSample.pitch += (raw.pitch - filteredSample.pitch) * Math.max(blend * 0.6, 0.025);
+  const baseBlend = clamp(0.28 - state.smoothing * 0.02, 0.05, 0.2);
+  const blendX = clamp(baseBlend + (5 - state.smoothingX) * 0.012, 0.035, 0.24);
+  const blendY = clamp(baseBlend + (5 - state.smoothingY) * 0.012, 0.03, 0.24);
+  const blendOpen = clamp(baseBlend + (5 - state.smoothingY) * 0.008, 0.03, 0.2);
+  const blendPitch = clamp(baseBlend + (5 - state.smoothingY) * 0.005, 0.025, 0.16);
+  filteredSample.x += (raw.x - filteredSample.x) * blendX;
+  filteredSample.eyeVertical += (raw.eyeVertical - filteredSample.eyeVertical) * Math.max(blendY * 0.95, 0.04);
+  filteredSample.openness += (raw.openness - filteredSample.openness) * Math.max(blendOpen * 0.9, 0.03);
+  filteredSample.pitch += (raw.pitch - filteredSample.pitch) * Math.max(blendPitch * 0.6, 0.02);
 
   state.faceDetected = true;
   state.trackingText = 'Rosto detectado';
@@ -661,6 +782,9 @@ export async function initEyeControl() {
   descEl = document.getElementById('calibration-description');
   badgeEl = document.getElementById('calibration-step-badge');
   placeholderEl = document.getElementById('camera-placeholder');
+  noticeOverlayEl = document.getElementById('calibration-notice-overlay');
+  noticeConfirmButton = document.getElementById('calibration-notice-confirm');
+  noticeCancelButton = document.getElementById('calibration-notice-cancel');
 
   loadStoredConfig();
   ensureOverlayCloseButton();
@@ -668,6 +792,25 @@ export async function initEyeControl() {
   prepareCalibrationSession(true);
   emit();
 
+  noticeConfirmButton?.addEventListener('click', async () => {
+    await unlockAudio();
+    resolveCalibrationNotice(true);
+    updateOverlay({
+      title: 'Preparando rastreamento',
+      description: 'Centralize o rosto e olhe para o meio do monitor. Assim que estiver estável, a calibração começa.',
+      progress: 0,
+      badge: 'Preparando',
+      showTarget: true
+    });
+  });
+
+  noticeCancelButton?.addEventListener('click', async () => {
+    await unlockAudio();
+    resolveCalibrationNotice(false);
+  });
+
+  window.addEventListener('pointerdown', unlockAudio, { passive: true });
+  window.addEventListener('keydown', unlockAudio, { passive: true });
   window.addEventListener('resize', () => {
     cursorPosition.x = clamp(cursorPosition.x, 18, window.innerWidth - 18);
     cursorPosition.y = clamp(cursorPosition.y, 18, window.innerHeight - 18);
@@ -688,8 +831,14 @@ export async function requestCamera() {
   await videoEl.play();
   state.cameraActive = true;
   state.trackingText = 'Aguardando rosto';
+  state.calibrationText = 'Aguardando confirmação do aviso';
   prepareCalibrationSession(true);
   startLoop();
+  emit();
+
+  const accepted = await showCalibrationNotice();
+  if (!accepted) return;
+
   updateOverlay({
     title: 'Preparando rastreamento',
     description: 'A câmera já está ligada. Centralize o rosto e olhe para o meio do monitor. O ajuste inicial vai começar sozinho.',
@@ -722,16 +871,32 @@ export function stopCamera() {
   cancelAnimationFrame(rafId);
   prepareCalibrationSession(true);
   hideOverlay();
+  if (noticeOverlayEl) noticeOverlayEl.classList.add('hidden');
   if (placeholderEl) placeholderEl.classList.remove('hidden');
   emit();
 }
 
 export async function startCalibration() {
   if (!state.cameraActive) throw new Error('A câmera precisa estar ligada.');
-  if (!state.faceDetected) throw new Error('Posicione o rosto na câmera primeiro.');
   prepareCalibrationSession(true);
+  state.calibrationText = 'Aguardando confirmação do aviso';
+  emit();
+  const accepted = await showCalibrationNotice();
+  if (!accepted) return false;
+  if (!state.faceDetected) {
+    updateOverlay({
+      title: 'Posicione o rosto na câmera',
+      description: 'Assim que o rosto estiver estável, a calibração desta sessão começa automaticamente.',
+      progress: 0,
+      badge: 'Aguardando rosto',
+      showTarget: true
+    });
+    emit();
+    return true;
+  }
   startNeutralCapture(performance.now(), false);
   emit();
+  return true;
 }
 
 export function toggleControlMode() {
@@ -749,6 +914,10 @@ export function toggleCursorVisibility() {
 export function updateEyeConfig(partial) {
   if (typeof partial.sensitivity === 'number') state.sensitivity = clamp(partial.sensitivity, 1, 10);
   if (typeof partial.smoothing === 'number') state.smoothing = clamp(partial.smoothing, 1, 10);
+  if (typeof partial.sensitivityX === 'number') state.sensitivityX = clamp(partial.sensitivityX, 1, 10);
+  if (typeof partial.sensitivityY === 'number') state.sensitivityY = clamp(partial.sensitivityY, 1, 10);
+  if (typeof partial.smoothingX === 'number') state.smoothingX = clamp(partial.smoothingX, 1, 10);
+  if (typeof partial.smoothingY === 'number') state.smoothingY = clamp(partial.smoothingY, 1, 10);
   saveStoredConfig();
   emit();
 }
@@ -765,6 +934,7 @@ export function getEyeControlState() {
   return {
     ...state,
     dwellMs: state.dwellMs,
+    dwellTargetMs: state.dwellTargetMs,
     targetLabel: state.targetLabel
   };
 }
