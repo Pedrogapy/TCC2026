@@ -501,15 +501,6 @@ function toggleMode() {
   return previous !== state.controlActive;
 }
 
-function updateBlink() {
-  if (!state.calibrated) {
-    state.controlActive = false;
-    return;
-  }
-  state.controlActive = !state.controlActive;
-  clearDwell();
-}
-
 function updateBlink(now, landmarks) {
   const ratio = computeBlinkRatio(landmarks);
   const isClosed = state.blinkClosed ? ratio < BLINK_OPEN_RATIO : ratio < BLINK_CLOSE_RATIO;
